@@ -5,35 +5,29 @@ import { supabase, ENV } from "./supabase-init.js";
 import * as store from "./store.js";
 
 import * as inicio from "./views/inicio.js";
-import * as capturar from "./views/capturar.js";
-import * as tickets from "./views/tickets.js";
 import * as reportes from "./views/reportes.js";
 import * as ventas from "./views/ventas.js";
 import * as insumos from "./views/insumos.js";
-import * as proyeccion from "./views/proyeccion.js";
 import * as requisicion from "./views/requisicion.js";
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.18";
+export const APP_VERSION = "v3.19";
 export const APP_FECHA = "15 jul 2026";
 
 const VISTAS = {
   inicio:      { mod: inicio,      ic: "🏠", txt: "Inicio" },
-  proyeccion:  { mod: proyeccion,  ic: "📈", txt: "Proyec." },
-  capturar:    { mod: capturar,    ic: "📸", txt: "Capturar" },
-  tickets:     { mod: tickets,     ic: "🧾", txt: "Tickets" },
-  reportes:    { mod: reportes,    ic: "📊", txt: "Gastos" },
-  ventas:      { mod: ventas,      ic: "💵", txt: "Ventas" },
   insumos:     { mod: insumos,     ic: "📦", txt: "Insumos" },
+  ventas:      { mod: ventas,      ic: "💵", txt: "Ventas" },
+  reportes:    { mod: reportes,    ic: "📊", txt: "Gastos" },
   requisicion: { mod: requisicion, ic: "🛒", txt: "Requis." }
 };
 
 // Pestañas visibles por rol. Los que NO están aquí (owner, admin, gerente y
 // desconocido) ven TODAS. En single-tenant (miRol=null) también ven todas.
 const TABS_ROL = {
-  chef:    ["inicio", "insumos", "requisicion", "capturar", "tickets"],
-  compras: ["inicio", "requisicion", "insumos", "capturar", "tickets"],
-  staff:   ["inicio", "capturar", "tickets"],
+  chef:    ["inicio", "insumos", "requisicion"],
+  compras: ["inicio", "requisicion", "insumos"],
+  staff:   ["inicio", "insumos"],
 };
 function tabsPermitidas() {
   const permit = TABS_ROL[store.state.miRol];

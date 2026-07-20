@@ -2,8 +2,35 @@
 import * as store from "../store.js";
 import { COLOR_AREA, AREAS, money, fechaBonita } from "../store.js";
 import { descargarCSV } from "../csv.js";
+import * as capturar from "./capturar.js";
+import * as tickets from "./tickets.js";
 
-export function render(el) {
+// Hub de Insumos: Capturar (registrar gasto) · Tickets (historial) · Precios.
+export function render(el, ctx) {
+  let sub = "capturar", limpiar = null;
+  el.innerHTML = `
+    <div class="segmented" style="font-size:13px">
+      <button data-s="capturar">Capturar</button>
+      <button data-s="tickets">Tickets</button>
+      <button data-s="precios">Precios</button>
+    </div>
+    <div id="isub"></div>`;
+  const subEl = el.querySelector("#isub");
+  const btns = [...el.querySelectorAll(".segmented button")];
+  btns.forEach((b) => b.addEventListener("click", () => { sub = b.dataset.s; marcar(); renderSub(); }));
+  function marcar() { btns.forEach((b) => b.classList.toggle("act", b.dataset.s === sub)); }
+  function renderSub() {
+    if (typeof limpiar === "function") { try { limpiar(); } catch (e) {} }
+    subEl.innerHTML = "";
+    limpiar = sub === "capturar" ? capturar.render(subEl, ctx)
+      : sub === "tickets" ? tickets.render(subEl, ctx)
+      : renderPrecios(subEl);
+  }
+  marcar(); renderSub();
+  return () => { if (typeof limpiar === "function") limpiar(); };
+}
+
+function renderPrecios(el) {
   const st = { q: "", area: "todas", orden: "az" };
 
   el.innerHTML = `
