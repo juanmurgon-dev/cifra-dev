@@ -10,8 +10,8 @@ export const TIPOS = ["costo de venta", "operativo"];
 export const UNIDADES = ["kg", "pz", "L", "caja", "paq", "manojo", "lt", "gr", "otro"];
 
 export const COLOR_AREA = {
-  cocina: "#0e3a39", barra: "#dd6031", piso: "#767522",
-  limpieza: "#491208", otro: "#9c9482"
+  cocina: "#2ec4b6", barra: "#ff9f1c", piso: "#ffbf69",
+  limpieza: "#148b7f", otro: "#7ea8a2"
 };
 
 // ── Estado en memoria ───────────────────────────────────────

@@ -58,7 +58,7 @@ function aplicarPWA(nombre, logo) {
       description: "Control financiero para tu restaurante — por Cifra",
       start_url: homeAbs, scope: homeAbs,
       display: "standalone", orientation: "portrait",
-      background_color: "#0a201c", theme_color: "#0a201c", lang: "es-MX",
+      background_color: "#f1fbfa", theme_color: "#f1fbfa", lang: "es-MX",
       icons: iconos,
     };
     const blob = new Blob([JSON.stringify(man)], { type: "application/manifest+json" });
