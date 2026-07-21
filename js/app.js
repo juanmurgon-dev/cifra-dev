@@ -4,6 +4,7 @@
 import { supabase, ENV } from "./supabase-init.js";
 import * as store from "./store.js";
 import * as marca from "./marca.js";
+import * as proveedores from "./proveedores.js";
 
 import * as inicio from "./views/inicio.js";
 import * as reportes from "./views/reportes.js";
@@ -12,7 +13,7 @@ import * as insumos from "./views/insumos.js";
 import * as requisicion from "./views/requisicion.js";
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.24";
+export const APP_VERSION = "v3.25";
 export const APP_FECHA = "15 jul 2026";
 
 const VISTAS = {
@@ -168,6 +169,7 @@ function abrirMenu() {
       <div class="sub" style="margin:-8px 2px 14px;word-break:break-all">${escaparHtml(usuarioActual?.email || "")}</div>
       <div class="menu-lista">
         ${puedePersonalizar ? `<button class="menu-item" data-a="marca"><span class="mi-ic">🎨</span><span class="mi-tx"><b>Personalizar marca</b><span class="sub">Cambiar logo y nombre del restaurante</span></span></button>` : ""}
+        <button class="menu-item" data-a="prov"><span class="mi-ic">🏪</span><span class="mi-tx"><b>Unificar proveedores</b><span class="sub">Juntar los que son el mismo</span></span></button>
         <button class="menu-item" data-a="update"><span class="mi-ic">🔄</span><span class="mi-tx"><b>Buscar actualización</b><span class="sub">${badge}${APP_VERSION} · ${APP_FECHA}</span></span></button>
         <button class="menu-item" data-a="salir"><span class="mi-ic">🚪</span><span class="mi-tx"><b>Cerrar sesión</b></span></button>
       </div>
@@ -181,6 +183,7 @@ function abrirMenu() {
     const a = b.dataset.a;
     cerrar();
     if (a === "marca") marca.abrirPersonalizar();
+    else if (a === "prov") proveedores.abrirProveedores();
     else if (a === "update") buscarActualizacion();
     else if (a === "salir") supabase.auth.signOut();
   }));
