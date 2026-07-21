@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 import { supabase, ENV } from "./supabase-init.js";
 import * as store from "./store.js";
+import * as marca from "./marca.js";
 
 import * as inicio from "./views/inicio.js";
 import * as reportes from "./views/reportes.js";
@@ -11,7 +12,7 @@ import * as insumos from "./views/insumos.js";
 import * as requisicion from "./views/requisicion.js";
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.20";
+export const APP_VERSION = "v3.21";
 export const APP_FECHA = "15 jul 2026";
 
 const VISTAS = {
@@ -99,7 +100,7 @@ function montarShell(user) {
   app.innerHTML = `
     <div class="shell">
       <header class="top">
-        <span id="marca"><span class="wordmark-cifra">Cifra</span></span>
+        <span id="marca" style="cursor:pointer" title="Personalizar tu marca"><span class="wordmark-cifra">Cifra</span></span>
         <div style="text-align:right">
           <div class="quien">${user.email}</div>
           <button class="linkbtn" id="salir">Salir</button>
@@ -112,6 +113,10 @@ function montarShell(user) {
     </div>`;
 
   document.getElementById("salir").addEventListener("click", () => supabase.auth.signOut());
+  const marcaEl = document.getElementById("marca");
+  if (marcaEl) marcaEl.addEventListener("click", () => {
+    if (!store.state.multiTenant || store.state.miRol === "owner") marca.abrirPersonalizar();
+  });
   const verBtn = document.getElementById("ver");
   if (verBtn) verBtn.addEventListener("click", buscarActualizacion);
 
@@ -133,7 +138,7 @@ function montarShell(user) {
 
   // Onboarding: si la BD es multi-tenant y el usuario aún no tiene restaurante,
   // pídelo antes que nada. Luego, el nombre de la persona.
-  let orgPedida = false, nombrePedido = false, rolPintado = "__none__", marcaPuesta = false;
+  let orgPedida = false, nombrePedido = false, rolPintado = "__none__";
   store.subscribe(() => {
     // Cuando ya se conoce el rol, ajusta las pestañas visibles.
     if (store.state.miRol !== rolPintado) {
@@ -141,8 +146,8 @@ function montarShell(user) {
       pintarTabs();
       if (!puedeVer(location.hash.replace("#/", "") || "inicio")) location.hash = "#/inicio";
     }
-    // White-label: mostrar el nombre del restaurante en vez del logo.
-    if (!marcaPuesta && store.state.orgNombre) { marcaPuesta = true; actualizarMarca(); }
+    // White-label: logo + nombre del restaurante en el header y en el ícono.
+    marca.aplicarMarcaActual();
     if (store.state.listo && store.state.multiTenant && !store.state.orgId && !orgPedida) {
       orgPedida = true;
       pedirRestaurante();
@@ -156,14 +161,6 @@ function montarShell(user) {
 }
 
 function escaparHtml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-
-// White-label: si hay nombre de restaurante (multi-tenant), muéstralo en el
-// encabezado en vez del logo de Cremina. En single-tenant se queda el logo.
-function actualizarMarca() {
-  const m = document.getElementById("marca");
-  if (!m || !store.state.orgNombre) return;
-  m.innerHTML = `<span style="font-family:'Playfair Display',Georgia,serif;color:var(--crema);font-size:18px;font-weight:600;line-height:1.1">${escaparHtml(store.state.orgNombre)}</span>`;
-}
 
 function pintarTabs() {
   const tabs = document.getElementById("tabs");
