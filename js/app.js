@@ -12,7 +12,7 @@ import * as insumos from "./views/insumos.js";
 import * as requisicion from "./views/requisicion.js";
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.22";
+export const APP_VERSION = "v3.23";
 export const APP_FECHA = "15 jul 2026";
 
 const VISTAS = {
@@ -101,24 +101,18 @@ function montarShell(user) {
     <div class="shell">
       <header class="top">
         <span id="marca" style="cursor:pointer" title="Personalizar tu marca"><span class="wordmark-cifra">Cifra</span></span>
-        <div style="text-align:right">
-          <div class="quien">${user.email}</div>
-          <button class="linkbtn" id="salir">Salir</button>
-          <button class="linkbtn" id="ver" title="Tocar para buscar actualización"
-            style="display:block;font-size:10px;color:${ENV === "staging" ? "#eaa84e" : "var(--gris)"};margin-top:2px;font-weight:${ENV === "staging" ? "700" : "400"}">${ENV === "staging" ? "🧪 STAGING · " : ""}${APP_VERSION} · ${APP_FECHA}</button>
-        </div>
+        <button class="hamb" id="menu" aria-label="Ajustes" title="Ajustes">☰</button>
       </header>
       <main class="vista" id="vista"></main>
       <nav class="tabs" id="tabs"></nav>
     </div>`;
 
-  document.getElementById("salir").addEventListener("click", () => supabase.auth.signOut());
+  const menuBtn = document.getElementById("menu");
+  if (menuBtn) menuBtn.addEventListener("click", abrirMenu);
   const marcaEl = document.getElementById("marca");
   if (marcaEl) marcaEl.addEventListener("click", () => {
     if (!store.state.multiTenant || store.state.miRol === "owner") marca.abrirPersonalizar();
   });
-  const verBtn = document.getElementById("ver");
-  if (verBtn) verBtn.addEventListener("click", buscarActualizacion);
 
   const tabs = document.getElementById("tabs");
   pintarTabs();
@@ -161,6 +155,36 @@ function montarShell(user) {
 }
 
 function escaparHtml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+// Menú ☰ → Ajustes: personalizar marca, actualizar, cerrar sesión.
+function abrirMenu() {
+  const puedePersonalizar = !store.state.multiTenant || store.state.miRol === "owner";
+  const badge = ENV === "staging" ? "🧪 STAGING · " : "";
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `
+    <div class="modal">
+      <h2>Ajustes</h2>
+      <div class="sub" style="margin:-8px 2px 14px;word-break:break-all">${escaparHtml(usuarioActual?.email || "")}</div>
+      <div class="menu-lista">
+        ${puedePersonalizar ? `<button class="menu-item" data-a="marca"><span class="mi-ic">🎨</span><span class="mi-tx"><b>Personalizar marca</b><span class="sub">Cambiar logo y nombre del restaurante</span></span></button>` : ""}
+        <button class="menu-item" data-a="update"><span class="mi-ic">🔄</span><span class="mi-tx"><b>Buscar actualización</b><span class="sub">${badge}${APP_VERSION} · ${APP_FECHA}</span></span></button>
+        <button class="menu-item" data-a="salir"><span class="mi-ic">🚪</span><span class="mi-tx"><b>Cerrar sesión</b></span></button>
+      </div>
+      <button class="btn sec" data-cerrar style="margin-top:14px">Cerrar</button>
+    </div>`;
+  document.body.appendChild(bg);
+  const cerrar = () => bg.remove();
+  bg.addEventListener("click", (e) => { if (e.target === bg) cerrar(); });
+  bg.querySelector("[data-cerrar]").addEventListener("click", cerrar);
+  bg.querySelectorAll(".menu-item").forEach((b) => b.addEventListener("click", () => {
+    const a = b.dataset.a;
+    cerrar();
+    if (a === "marca") marca.abrirPersonalizar();
+    else if (a === "update") buscarActualizacion();
+    else if (a === "salir") supabase.auth.signOut();
+  }));
+}
 
 function pintarTabs() {
   const tabs = document.getElementById("tabs");

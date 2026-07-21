@@ -78,6 +78,21 @@ header.top {
 header.top .logo-img { height: 28px; width: auto; display: block; }
 header.top .quien { font-size: 12px; color: var(--sea-mid); }
 .linkbtn { background: none; border: none; color: var(--tinta); font-size: 14px; padding: 6px; cursor: pointer; }
+.hamb { background: none; border: none; color: var(--tinta); font-size: 23px; line-height: 1; cursor: pointer; padding: 6px 4px; border-radius: 10px; }
+.hamb:active { background: var(--mint-2); }
+
+/* ── Menú de ajustes ──────────────────────────────────────── */
+.menu-lista { display: flex; flex-direction: column; gap: 9px; }
+.menu-item {
+  display: flex; align-items: center; gap: 13px; text-align: left; width: 100%;
+  background: var(--mint-2); border: 1px solid var(--linea); border-radius: 14px;
+  padding: 13px 14px; font-size: 15px; font-family: inherit; color: var(--tinta); cursor: pointer;
+}
+.menu-item:active { background: #dff4f1; }
+.menu-item .mi-ic { font-size: 21px; flex: none; }
+.menu-item .mi-tx { display: flex; flex-direction: column; line-height: 1.25; }
+.menu-item b { font-weight: 600; }
+.menu-item .sub { font-size: 12px; margin-top: 1px; }
 
 main.vista { flex: 1; padding: 16px; padding-bottom: 100px; max-width: 720px; margin: 0 auto; width: 100%; overflow-x: hidden; }
 
