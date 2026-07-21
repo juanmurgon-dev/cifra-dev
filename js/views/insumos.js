@@ -12,7 +12,7 @@ export function render(el, ctx) {
     <div class="segmented" style="font-size:13px">
       <button data-s="capturar">Capturar</button>
       <button data-s="tickets">Tickets</button>
-      <button data-s="precios">Precios</button>
+      <button data-s="precios">Lista de Precios</button>
     </div>
     <div id="isub"></div>`;
   const subEl = el.querySelector("#isub");
