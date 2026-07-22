@@ -167,9 +167,9 @@ async function enviar(pregunta) {
     if (data && data.error) throw new Error(data.error);
 
     if (data && data.limite_alcanzado) {
-      nota(`Llegaste al tope de ${data.limite} preguntas por hoy. Vuelve mañana 🙂`, "err");
       historial.pop();   // no contó como turno con respuesta
-      pintar();
+      pintar();          // re-dibuja el historial ANTES de la nota (si no, la borra)
+      nota(`Llegaste al tope de ${data.limite} preguntas por hoy. Vuelve mañana 🙂`, "err");
       return;
     }
 
@@ -180,9 +180,9 @@ async function enviar(pregunta) {
     if (q && data && data.limite) q.textContent = `Llevas ${data.usadas} de ${data.limite} preguntas de hoy`;
   } catch (e) {
     if (pensando) pensando.remove();
-    nota("No pude responder: " + ((e && e.message) || e), "err");
     historial.pop();   // quita la pregunta que no obtuvo respuesta
-    pintar();
+    pintar();          // re-dibuja ANTES de la nota de error (si no, la borra)
+    nota("No pude responder: " + ((e && e.message) || e), "err");
   } finally {
     if (bg) { const b = bg.querySelector("#chat-form button"); if (b) b.disabled = false; }
   }
