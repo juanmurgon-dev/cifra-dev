@@ -7,6 +7,7 @@
 // "costo base" del platillo. Muestra mina de oro y alertas de margen bajo.
 import * as store from "../store.js";
 import { money } from "../store.js";
+import * as info from "../info.js";
 
 const ES_CORTESIA = /pan de cortes[íi]a/i;
 // La leche/temperatura no es el grupo principal (para no confundir el desglose).
@@ -52,7 +53,9 @@ export function render(el) {
   // Arma la lista de "renglones": una por variante (platillo + opción), o una
   // por platillo cuando no tiene grupo modificador.
   function construirItems(periodo) {
-    const varAll = store.state.variantes || [];
+    // En modo "solo artículo" ignoramos las variantes: el margen se arma a
+    // nivel platillo (el costo se captura por platillo, no por variante).
+    const varAll = store.usaVariantes() ? (store.state.variantes || []) : [];
     const vars = varAll.filter((v) =>
       v.periodo === periodo && !ES_CORTESIA.test(v.producto || "") && !ES_CORTESIA.test(v.opcion || ""));
 
@@ -141,8 +144,8 @@ export function render(el) {
 
       <div class="card">
         <div class="row-stats">
-          <div class="stat"><div class="n" style="color:${cColor(margenProm)}">${margenProm == null ? "—" : Math.round(margenProm) + "%"}</div><div class="l">Margen prom.</div></div>
-          <div class="stat"><div class="n" style="font-size:15px">${mina ? escapar(mina.label) : "—"}</div><div class="l">🏆 Mina de oro</div></div>
+          <div class="stat"><div class="n" style="color:${cColor(margenProm)}">${margenProm == null ? "—" : Math.round(margenProm) + "%"}</div><div class="l">Margen prom.${info.icono("margen")}</div></div>
+          <div class="stat"><div class="n" style="font-size:15px">${mina ? escapar(mina.label) : "—"}</div><div class="l">🏆 Mina de oro${info.icono("minaOro")}</div></div>
           <div class="stat"><div class="n">${sinCosto.length}</div><div class="l">Sin costo</div></div>
         </div>
         ${margenProm == null
