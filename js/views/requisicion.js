@@ -442,9 +442,81 @@ export function render(el) {
       ["Proveedor", "Insumo", "Cantidad", "Unidad", "Precio unit.", "Monto"], filas);
   }
 
-  // Genera un documento con formato y abre la impresión del sistema, donde
-  // eliges "Guardar como PDF" (funciona en Android, iPhone y computadora).
-  function exportarPdf() {
+  // Genera un PDF REAL y lo descarga (no depende del diálogo de impresión).
+  // Si no hay internet para cargar la librería, cae al respaldo de impresión.
+  async function exportarPdf() {
+    const btn = el.querySelector("#rqPdf");
+    const txtOrig = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Generando…"; }
+    try {
+      const mod = await import("https://esm.sh/jspdf@2.5.2");
+      const JsPDF = mod.jsPDF || (mod.default && mod.default.jsPDF) || mod.default;
+      const doc = new JsPDF({ unit: "mm", format: "a4" });
+      const M = 14, W = 210, RIGHT = W - M;
+      const e = estatusInfo(derivar(editing.items));
+      let y = 18;
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(14, 58, 57);
+      doc.text("Requisición de compras", M, y); y += 5.5;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(110, 106, 92);
+      doc.text(`${hoyTxt()} · ${e.t} · ${editing.items.length} insumo${editing.items.length === 1 ? "" : "s"}`, M, y); y += 5;
+
+      const encabezado = () => {
+        doc.setDrawColor(14, 58, 57); doc.setLineWidth(0.5); doc.line(M, y, RIGHT, y); y += 4;
+        doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(14, 58, 57);
+        doc.text("INSUMO", M + 5, y);
+        doc.text("CANTIDAD", M + 96, y);
+        doc.text("PRECIO", RIGHT - 32, y, { align: "right" });
+        doc.text("MONTO", RIGHT, y, { align: "right" });
+        y += 2.5; doc.setDrawColor(220, 220, 220); doc.setLineWidth(0.2); doc.line(M, y, RIGHT, y); y += 4;
+      };
+      const salto = () => { if (y > 270) { doc.addPage(); y = 18; encabezado(); } };
+      encabezado();
+
+      for (const [prov, list] of grupos()) {
+        salto();
+        doc.setFillColor(244, 239, 226); doc.rect(M, y - 3.6, RIGHT - M, 5.6, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(14, 58, 57);
+        doc.text(String(prov).slice(0, 55), M + 1.5, y); y += 6;
+
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(34, 32, 26);
+        for (const it of list) {
+          salto();
+          doc.text(it.estatus === "pedido" ? "OK" : "-", M, y);
+          doc.text(String(it.nombre || "").slice(0, 44), M + 5, y);
+          doc.text(`${num(it.cantidad)} ${it.unidad || ""}`.trim(), M + 96, y);
+          doc.text(num(it.precio) ? money(num(it.precio)) : "-", RIGHT - 32, y, { align: "right" });
+          doc.text(num(it.precio) ? money(montoDe(it)) : "-", RIGHT, y, { align: "right" });
+          y += 5;
+        }
+        salto();
+        doc.setFont("helvetica", "bold"); doc.setTextColor(110, 106, 92);
+        doc.text("Subtotal " + String(prov).slice(0, 28), RIGHT - 32, y, { align: "right" });
+        doc.text(money(totalDe(list)), RIGHT, y, { align: "right" });
+        doc.setDrawColor(225, 225, 225); doc.setLineWidth(0.2); doc.line(M, y + 1.5, RIGHT, y + 1.5);
+        y += 8;
+      }
+
+      salto();
+      doc.setDrawColor(14, 58, 57); doc.setLineWidth(0.5); doc.line(M, y, RIGHT, y); y += 6;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(14, 58, 57);
+      doc.text("TOTAL", RIGHT - 32, y, { align: "right" });
+      doc.text(money(totalDe(editing.items)), RIGHT, y, { align: "right" });
+
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(168, 162, 150);
+      doc.text("Generado con Platify", W / 2, 288, { align: "center" });
+
+      doc.save("Requisicion-" + hoyTxt().replace(/ /g, "-") + ".pdf");
+    } catch (err) {
+      console.warn("PDF directo falló, uso impresión:", err);
+      imprimirPdf();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = txtOrig || "📄 Guardar PDF"; }
+    }
+  }
+
+  // Respaldo: documento con formato + impresión del sistema ("Guardar como PDF").
+  function imprimirPdf() {
     const e = estatusInfo(derivar(editing.items));
     const fecha = hoyTxt();
     let filas = "";
