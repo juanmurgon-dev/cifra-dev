@@ -5,6 +5,7 @@
 // Al guardar, escribe el costo en costos_platillo → el Margen se actualiza solo.
 import * as store from "../store.js";
 import { money } from "../store.js";
+import { parsearCSV, descargarCSV } from "../csv.js";
 
 const num = (x) => { const n = parseFloat(x); return isNaN(n) ? 0 : n; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -28,6 +29,42 @@ function preparaciones() {
   const set = new Set();
   for (const r of store.state.recetas || []) if (r.es_preparacion) set.add(r.producto);
   return [...set].sort();
+}
+
+// Agrupa las filas de un CSV en recetas. Una fila por ingrediente; se agrupan por 'platillo'.
+function gruposDesdeCSV(objs) {
+  const n2 = (x) => { const n = parseFloat(String(x).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? 0 : n; };
+  const esSi = (v) => /^(s[ií]|1|true|x|yes)$/i.test(String(v || "").trim());
+  const map = new Map();
+  for (const o of objs) {
+    const prod = (o.platillo || o.receta || o.producto || "").trim();
+    const insumo = (o.insumo || o.ingrediente || "").trim();
+    if (!prod || !insumo) continue;
+    if (!map.has(prod)) map.set(prod, { producto: prod, es_preparacion: false, rendimiento: 1, rinde_unidad: "", items: [] });
+    const g = map.get(prod);
+    if (esSi(o.es_preparacion || o.preparacion || o.subreceta)) g.es_preparacion = true;
+    if (o.rendimiento) g.rendimiento = n2(o.rendimiento) || 1;
+    const ru = (o.rinde_unidad || o.unidad_rinde || o.unidad_preparacion || "").trim();
+    if (ru) g.rinde_unidad = ru;
+    g.items.push({ insumo, cantidad: n2(o.cantidad), unidad: (o.unidad || "").trim() });
+  }
+  return [...map.values()];
+}
+
+// Descarga un CSV con el formato correcto y ejemplos, para armar las recetas ahí.
+function descargarPlantilla() {
+  descargarCSV("plantilla-recetas-platify",
+    ["platillo", "insumo", "cantidad", "unidad", "es_preparacion", "rendimiento", "rinde_unidad"],
+    [
+      ["Chilaquiles Verdes", "Tortilla", "0.15", "kg", "", "", ""],
+      ["Chilaquiles Verdes", "Salsa verde", "0.12", "L", "", "", ""],
+      ["Chilaquiles Verdes", "Queso fresco", "0.05", "kg", "", "", ""],
+      ["Chilaquiles Verdes", "Crema", "0.03", "L", "", "", ""],
+      ["Salsa verde", "Tomate verde", "1", "kg", "si", "2", "L"],
+      ["Salsa verde", "Chile serrano", "0.1", "kg", "si", "2", "L"],
+      ["Salsa verde", "Cebolla", "0.15", "kg", "si", "2", "L"],
+    ]
+  );
 }
 
 export function render(el) {
@@ -67,6 +104,11 @@ export function render(el) {
         <div class="card">
           <h2 style="margin-bottom:2px">Recetas por platillo</h2>
           <p class="sub" style="margin-top:0">Con receta: <b>${conReceta}</b> de ${arr.length}. Captura la receta y el costo/margen salen solos de tus compras.</p>
+          <div class="fila" style="gap:8px;margin:8px 0 4px">
+            <button class="btn sec chico" id="impcsv" style="flex:1">⬆ Importar CSV</button>
+            <button class="btn sec chico" id="plantilla" style="flex:1">⬇ Descargar formato</button>
+          </div>
+          <input type="file" id="fcsv" accept=".csv,text/csv" style="display:none" />
           <input id="bq" placeholder="Buscar platillo…" style="margin:6px 0 12px" value="${esc(st.q)}" />
           <div id="lista"></div>
         </div>`;
@@ -91,6 +133,19 @@ export function render(el) {
       }).join("");
       const bq = cont.querySelector("#bq");
       bq.addEventListener("input", () => { st.q = bq.value; const s = bq.selectionStart; draw(); const nb = cont.querySelector("#bq"); nb.focus(); nb.setSelectionRange(s, s); });
+      cont.querySelector("#plantilla").addEventListener("click", descargarPlantilla);
+      const fcsv = cont.querySelector("#fcsv");
+      cont.querySelector("#impcsv").addEventListener("click", () => fcsv.click());
+      fcsv.addEventListener("change", async () => {
+        const file = fcsv.files[0]; if (!file) return;
+        const btn = cont.querySelector("#impcsv"); if (btn) btn.textContent = "Importando…";
+        try {
+          const grupos = gruposDesdeCSV(parsearCSV(await file.text()));
+          if (!grupos.length) alert("No encontré recetas en el CSV. Debe tener columnas 'platillo' e 'insumo'. Usa 'Descargar formato'.");
+          else { const n = await store.importarRecetas(grupos); alert(`Listo: ${n} recetas/subrecetas importadas.`); draw(); }
+        } catch (e) { alert("Error al importar: " + (e.message || e)); }
+        fcsv.value = ""; const b2 = cont.querySelector("#impcsv"); if (b2) b2.textContent = "⬆ Importar CSV";
+      });
       cont.querySelectorAll(".fila-item").forEach((b) => b.addEventListener("click", () => { editando = { nombre: b.dataset.p, esPrep: false }; pintar(); }));
     }
     draw();
@@ -126,14 +181,11 @@ export function render(el) {
   function editor(cont, nombre, esPrep) {
     const existentes = nombre ? store.recetasDe(nombre) : [];
     const filaPrep = esPrep && nombre ? store.state.recetas.find((r) => r.producto === nombre && r.es_preparacion) : null;
-    let items = existentes.map((r) => ({ insumo: r.insumo, cantidad: r.cantidad, unidad: r.unidad || "" }));
-    if (!items.length) items = [{ insumo: "", cantidad: "", unidad: "" }];
+    let items = existentes.map((r) => ({ insumo: r.insumo, cantidad: r.cantidad, unidad: r.unidad || "", modo: store.esPreparacion(r.insumo) ? "subreceta" : "insumo" }));
+    if (!items.length) items = [{ insumo: "", cantidad: "", unidad: "", modo: "insumo" }];
     let nom = nombre || "";
-    let unidadPrep = filaPrep ? (existentes[0] ? "" : "") : "";
     let rendimiento = filaPrep ? filaPrep.rendimiento : 1;
-    // unidad de la preparación = la que se guarda en 'unidad' de sus renglones? No: la preparación
-    // rinde en 'unidadPrep'. La guardamos en el rendimiento; su unidad la tomamos del primer insumo por defecto.
-    let unidadRinde = filaPrep && existentes[0] ? (filaPrep.unidad || "") : "";
+    let unidadRinde = esPrep && nombre ? store.unidadPreparacion(nombre) : "";
 
     const insumosLista = store.preciosPorInsumo();
     const datalist = `<datalist id="dl-insumos">${insumosLista.map((i) => `<option value="${esc(i.nombre)}">`).join("")}${preparaciones().filter((p) => p !== nom).map((p) => `<option value="${esc(p)}">`).join("")}</datalist>`;
@@ -141,7 +193,9 @@ export function render(el) {
     const plat = !esPrep ? platillos().find((p) => p.producto === nombre) : null;
     const precioVenta = plat ? plat.precio : 0;
 
+    const prepsDisp = () => preparaciones().filter((p) => p !== nom);
     function unidadDe(insumo) {
+      if (store.esPreparacion(insumo)) return store.unidadPreparacion(insumo);
       const hit = insumosLista.find((i) => i.nombre.toLowerCase() === String(insumo).trim().toLowerCase());
       return hit ? (hit.unidad || "") : "";
     }
@@ -168,7 +222,10 @@ export function render(el) {
 
           <div style="margin-top:12px;font-weight:700;font-size:13px">Ingredientes</div>
           <div id="rows"></div>
-          <button class="btn sec chico" id="add" style="margin-top:8px">＋ Agregar ingrediente</button>
+          <div class="fila" style="gap:8px;margin-top:8px">
+            <button class="btn sec chico" id="add" style="flex:1">＋ Ingrediente</button>
+            <button class="btn sec chico" id="addprep" style="flex:1"${prepsDisp().length ? "" : " disabled"}>＋ Subreceta</button>
+          </div>
 
           <div style="margin-top:16px;border-top:1px solid var(--linea);padding-top:12px">
             <div class="fila" style="justify-content:space-between"><span class="sub">Costo de la receta</span><b>${money(costoTotal)}</b></div>
@@ -186,11 +243,14 @@ export function render(el) {
       const rows = cont.querySelector("#rows");
       rows.innerHTML = items.map((it, i) => {
         const linea = num(it.cantidad) * store.costoInsumo(it.insumo);
+        const campo = it.modo === "subreceta"
+          ? `<select class="rin" style="flex:2;min-width:0"><option value="">— elige subreceta —</option>${prepsDisp().map((p) => `<option value="${esc(p)}"${p === it.insumo ? " selected" : ""}>${esc(p)}</option>`).join("")}</select>`
+          : `<input class="rin" list="dl-insumos" placeholder="Insumo" value="${esc(it.insumo)}" style="flex:2;min-width:0" />`;
         return `
           <div class="fila" style="gap:6px;align-items:center;margin-top:8px" data-i="${i}">
-            <input class="rin" list="dl-insumos" placeholder="Insumo" value="${esc(it.insumo)}" style="flex:2;min-width:0" />
+            ${campo}
             <input class="rc" type="number" inputmode="decimal" min="0" step="any" placeholder="Cant." value="${esc(String(it.cantidad))}" style="flex:1;min-width:0" />
-            <span class="sub" style="width:34px;font-size:11px">${esc(it.unidad || unidadDe(it.insumo))}</span>
+            <span class="sub" style="width:38px;font-size:11px">${esc(it.unidad || unidadDe(it.insumo))}${it.modo === "subreceta" ? " 🧪" : ""}</span>
             <span class="sub" style="width:64px;text-align:right;font-size:12px">${linea ? money(linea) : ""}</span>
             <button class="rx" title="Quitar" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:18px;width:24px">×</button>
           </div>`;
@@ -208,7 +268,9 @@ export function render(el) {
       });
 
       cont.querySelector("#volver").addEventListener("click", () => { editando = null; pintar(); });
-      cont.querySelector("#add").addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "" }); draw(); });
+      cont.querySelector("#add").addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", modo: "insumo" }); draw(); });
+      const ap = cont.querySelector("#addprep");
+      if (ap) ap.addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", modo: "subreceta" }); draw(); });
       if (esPrep) {
         cont.querySelector("#nom").addEventListener("input", (e) => { nom = e.target.value; });
         cont.querySelector("#rend").addEventListener("input", (e) => { rendimiento = e.target.value; });
@@ -228,7 +290,7 @@ export function render(el) {
       msg.textContent = "Guardando…";
       try {
         await store.guardarReceta(destino, limpios.map((it) => ({ insumo: it.insumo.trim(), cantidad: num(it.cantidad), unidad: it.unidad || unidadDe(it.insumo) })),
-          esPrep ? { es_preparacion: true, rendimiento: num(rendimiento) || 1 } : {});
+          esPrep ? { es_preparacion: true, rendimiento: num(rendimiento) || 1, rinde_unidad: unidadRinde } : {});
         editando = null; shell();
       } catch (e) { msg.textContent = "Error: " + (e.message || e); }
     }

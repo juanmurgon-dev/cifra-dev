@@ -171,6 +171,11 @@ function rendimientoDe(nombre) {
   const f = (state.recetas || []).find((r) => r.producto === nombre && r.es_preparacion);
   return f && num(f.rendimiento) > 0 ? num(f.rendimiento) : 1;
 }
+// Unidad en la que rinde una preparación (para mostrar "$/L").
+export function unidadPreparacion(nombre) {
+  const f = (state.recetas || []).find((r) => r.producto === nombre && r.es_preparacion);
+  return f ? (f.rinde_unidad || "") : "";
+}
 
 // Costo por unidad de un insumo, resolviendo preparaciones (recursivo, anti-ciclos).
 export function costoInsumo(nombre, seen) {
@@ -201,6 +206,7 @@ export async function guardarReceta(producto, items, opts) {
     unidad: i.unidad || "",
     es_preparacion: !!opts.es_preparacion,
     rendimiento: opts.es_preparacion ? (num(opts.rendimiento) || 1) : 1,
+    rinde_unidad: opts.es_preparacion ? (opts.rinde_unidad || "") : "",
   }));
   if (filas.length) {
     const { error } = await supabase.from("recetas").insert(filas);
@@ -232,6 +238,25 @@ export async function recalcularTodos() {
     }
   }
   if (cambios) await cargarCostosPlatillo();
+}
+
+// Importa varias recetas de golpe (de un CSV). Reemplaza las que ya existan.
+// grupos = [{producto, es_preparacion, rendimiento, rinde_unidad, items:[{insumo,cantidad,unidad}]}]
+export async function importarRecetas(grupos) {
+  const ordenados = [...(grupos || [])].sort((a, b) => (b.es_preparacion ? 1 : 0) - (a.es_preparacion ? 1 : 0)); // preparaciones primero
+  for (const g of ordenados) {
+    if (!g.producto) continue;
+    await supabase.from("recetas").delete().eq("producto", g.producto);
+    const filas = (g.items || []).filter((i) => i.insumo && num(i.cantidad) > 0).map((i) => ({
+      producto: g.producto, insumo: i.insumo, cantidad: num(i.cantidad), unidad: i.unidad || "",
+      es_preparacion: !!g.es_preparacion, rendimiento: g.es_preparacion ? (num(g.rendimiento) || 1) : 1,
+      rinde_unidad: g.es_preparacion ? (g.rinde_unidad || "") : "",
+    }));
+    if (filas.length) { const { error } = await supabase.from("recetas").insert(filas); if (error) throw error; }
+  }
+  await cargarRecetas();
+  await recalcularTodos();
+  return ordenados.length;
 }
 
 async function cargarRequisiciones() {
