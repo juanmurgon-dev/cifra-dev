@@ -151,6 +151,28 @@ async function cargarRecetas() {
 
 const round2 = (n) => Math.round((num(n) || 0) * 100) / 100;
 
+// Conversión de unidades para costear como tu hoja: cantidad en g/ml, precio por kg/L.
+const _uBase = {
+  g: ["g", 1], gr: ["g", 1], grs: ["g", 1], gramo: ["g", 1], gramos: ["g", 1],
+  kg: ["g", 1000], kgs: ["g", 1000], kilo: ["g", 1000], kilos: ["g", 1000], mg: ["g", 0.001],
+  ml: ["ml", 1], cc: ["ml", 1], l: ["ml", 1000], lt: ["ml", 1000], lts: ["ml", 1000], litro: ["ml", 1000], litros: ["ml", 1000],
+  pza: ["pza", 1], pz: ["pza", 1], pzas: ["pza", 1], pieza: ["pza", 1], piezas: ["pza", 1], u: ["pza", 1], un: ["pza", 1], unidad: ["pza", 1],
+};
+const normU = (u) => String(u || "").trim().toLowerCase().replace(/[.\s]+$/, "");
+// Factor para pasar de 'desde' a 'hacia' (misma familia). Si no se puede, 1 (asume misma unidad).
+export function factorConversion(desde, hacia) {
+  const a = _uBase[normU(desde)], b = _uBase[normU(hacia)];
+  if (!a || !b || a[0] !== b[0]) return 1;
+  return a[1] / b[1];
+}
+// Unidad de receta sugerida según cómo compras (kg→g, L→ml).
+export function sugerirUnidadReceta(unidadCompra) {
+  const u = normU(unidadCompra);
+  if (u === "kg" || u === "kgs" || u === "kilo" || u === "kilos") return "g";
+  if (u === "l" || u === "lt" || u === "lts" || u === "litro" || u === "litros") return "ml";
+  return unidadCompra || "";
+}
+
 // Precio (última compra) de un insumo por nombre.
 export function precioInsumo(nombre) {
   const key = String(nombre || "").trim().toLowerCase();
@@ -188,10 +210,24 @@ export function costoInsumo(nombre, seen) {
   return precioInsumo(nombre);
 }
 
-// Costo total de la receta de un platillo/preparación (con los precios de compra actuales).
+// Unidad de compra de un insumo (o la unidad en que rinde, si es preparación).
+export function unidadInsumo(nombre) {
+  if (esPreparacion(nombre)) return unidadPreparacion(nombre);
+  const key = String(nombre || "").trim().toLowerCase();
+  const hit = preciosPorInsumo().find((i) => i.nombre.toLowerCase() === key);
+  return hit ? (hit.unidad || "") : "";
+}
+
+// Costo de un renglón: cantidad × conversión de unidad × costo por unidad de compra.
+// Ej.: 80 g de queso a $176/kg → 80 × (g→kg = 0.001) × 176 = 14.08 (como tu hoja de costeo).
+export function costoLinea(insumo, cantidad, unidad, seen) {
+  return num(cantidad) * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
+}
+
+// Costo total de la receta (precios de compra actuales + conversión de unidades).
 export function costoDeReceta(producto, seen) {
   let total = 0;
-  for (const r of recetasDe(producto)) total += num(r.cantidad) * costoInsumo(r.insumo, seen);
+  for (const r of recetasDe(producto)) total += costoLinea(r.insumo, r.cantidad, r.unidad, seen);
   return total;
 }
 

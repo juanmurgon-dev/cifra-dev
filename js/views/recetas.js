@@ -10,6 +10,7 @@ import { parsearCSV, descargarCSV } from "../csv.js";
 const num = (x) => { const n = parseFloat(x); return isNaN(n) ? 0 : n; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const colorMargen = (pct) => pct == null ? "var(--sub)" : pct >= 65 ? "var(--verde)" : pct >= 45 ? "#c9740a" : "var(--rojo)";
+const colorFood = (pct) => pct == null ? "var(--sub)" : pct <= 35 ? "var(--verde)" : pct <= 50 ? "#c9740a" : "var(--rojo)";
 
 // Platillos (de productos_venta), agregados por nombre, con su precio de venta.
 function platillos() {
@@ -56,13 +57,15 @@ function descargarPlantilla() {
   descargarCSV("plantilla-recetas-platify",
     ["platillo", "insumo", "cantidad", "unidad", "es_preparacion", "rendimiento", "rinde_unidad"],
     [
-      ["Chilaquiles Verdes", "Tortilla", "0.15", "kg", "", "", ""],
-      ["Chilaquiles Verdes", "Salsa verde", "0.12", "L", "", "", ""],
-      ["Chilaquiles Verdes", "Queso fresco", "0.05", "kg", "", "", ""],
-      ["Chilaquiles Verdes", "Crema", "0.03", "L", "", "", ""],
-      ["Salsa verde", "Tomate verde", "1", "kg", "si", "2", "L"],
-      ["Salsa verde", "Chile serrano", "0.1", "kg", "si", "2", "L"],
-      ["Salsa verde", "Cebolla", "0.15", "kg", "si", "2", "L"],
+      ["Omelette de Carnes", "huevo", "120", "g", "", "", ""],
+      ["Omelette de Carnes", "chorizo", "20", "g", "", "", ""],
+      ["Omelette de Carnes", "jamon", "20", "g", "", "", ""],
+      ["Omelette de Carnes", "frijol", "100", "g", "", "", ""],
+      ["Omelette de Carnes", "queso monterrey", "80", "g", "", "", ""],
+      ["Omelette de Carnes", "papa campesina", "100", "g", "", "", ""],
+      ["Omelette de Carnes", "brote de rabano", "2", "g", "", "", ""],
+      ["Salsa verde", "tomate verde", "1000", "g", "si", "2", "L"],
+      ["Salsa verde", "chile serrano", "100", "g", "si", "2", "L"],
     ]
   );
 }
@@ -195,9 +198,7 @@ export function render(el) {
 
     const prepsDisp = () => preparaciones().filter((p) => p !== nom);
     function unidadDe(insumo) {
-      if (store.esPreparacion(insumo)) return store.unidadPreparacion(insumo);
-      const hit = insumosLista.find((i) => i.nombre.toLowerCase() === String(insumo).trim().toLowerCase());
-      return hit ? (hit.unidad || "") : "";
+      return store.sugerirUnidadReceta(store.unidadInsumo(insumo));
     }
 
     function draw() {
@@ -205,6 +206,7 @@ export function render(el) {
       const costoUnit = esPrep && num(rendimiento) > 0 ? costoTotal / num(rendimiento) : costoTotal;
       const margen = precioVenta - costoTotal;
       const margPct = precioVenta > 0 ? margen / precioVenta * 100 : null;
+      const foodPct = precioVenta > 0 ? costoTotal / precioVenta * 100 : null;
 
       cont.innerHTML = `
         ${datalist}
@@ -232,7 +234,8 @@ export function render(el) {
             ${esPrep
               ? `<div class="fila" style="justify-content:space-between"><span class="sub">Costo por ${esc(unidadRinde || "unidad")}</span><b>${money(costoUnit)}</b></div>`
               : `<div class="fila" style="justify-content:space-between"><span class="sub">Precio de venta</span><b>${money(precioVenta)}</b></div>
-                 <div class="fila" style="justify-content:space-between"><span class="sub">Margen</span><b style="color:${colorMargen(margPct)}">${money(margen)}${margPct != null ? " · " + margPct.toFixed(0) + "%" : ""}</b></div>`}
+                 <div class="fila" style="justify-content:space-between"><span class="sub">Food cost</span><b style="color:${colorFood(foodPct)}">${foodPct != null ? foodPct.toFixed(0) + "%" : "—"}</b></div>
+                 <div class="fila" style="justify-content:space-between"><span class="sub">Margen neto</span><b style="color:${colorMargen(margPct)}">${money(margen)}${margPct != null ? " · " + margPct.toFixed(0) + "%" : ""}</b></div>`}
           </div>
 
           <button class="btn" id="guardar" style="margin-top:14px">Guardar receta</button>
@@ -242,29 +245,31 @@ export function render(el) {
 
       const rows = cont.querySelector("#rows");
       rows.innerHTML = items.map((it, i) => {
-        const linea = num(it.cantidad) * store.costoInsumo(it.insumo);
+        const uLinea = it.unidad || unidadDe(it.insumo);
+        const linea = store.costoLinea(it.insumo, it.cantidad, uLinea);
         const campo = it.modo === "subreceta"
           ? `<select class="rin" style="flex:2;min-width:0"><option value="">— elige subreceta —</option>${prepsDisp().map((p) => `<option value="${esc(p)}"${p === it.insumo ? " selected" : ""}>${esc(p)}</option>`).join("")}</select>`
           : `<input class="rin" list="dl-insumos" placeholder="Insumo" value="${esc(it.insumo)}" style="flex:2;min-width:0" />`;
         return `
-          <div class="fila" style="gap:6px;align-items:center;margin-top:8px" data-i="${i}">
+          <div class="fila" style="gap:5px;align-items:center;margin-top:8px" data-i="${i}">
             ${campo}
-            <input class="rc" type="number" inputmode="decimal" min="0" step="any" placeholder="Cant." value="${esc(String(it.cantidad))}" style="flex:1;min-width:0" />
-            <span class="sub" style="width:38px;font-size:11px">${esc(it.unidad || unidadDe(it.insumo))}${it.modo === "subreceta" ? " 🧪" : ""}</span>
-            <span class="sub" style="width:64px;text-align:right;font-size:12px">${linea ? money(linea) : ""}</span>
-            <button class="rx" title="Quitar" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:18px;width:24px">×</button>
+            <input class="rc" type="number" inputmode="decimal" min="0" step="any" placeholder="Cant." value="${esc(String(it.cantidad))}" style="width:54px;flex:0 0 auto;min-width:0" />
+            <input class="ru" value="${esc(uLinea)}" placeholder="u" title="unidad: g, ml, pza…" style="width:40px;flex:0 0 auto;min-width:0;text-align:center;font-size:12px" />
+            <span class="sub" style="width:56px;text-align:right;font-size:12px">${linea ? money(linea) : ""}${it.modo === "subreceta" ? " 🧪" : ""}</span>
+            <button class="rx" title="Quitar" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:18px;width:22px">×</button>
           </div>`;
       }).join("");
 
       // eventos de filas
       rows.querySelectorAll("[data-i]").forEach((fila) => {
         const i = +fila.dataset.i;
-        const rin = fila.querySelector(".rin"), rc = fila.querySelector(".rc");
+        const rin = fila.querySelector(".rin"), rc = fila.querySelector(".rc"), ru = fila.querySelector(".ru");
         rin.addEventListener("change", () => { items[i].insumo = rin.value; items[i].unidad = unidadDe(rin.value); draw(); });
         rin.addEventListener("blur", () => { if (items[i].insumo !== rin.value) { items[i].insumo = rin.value; items[i].unidad = unidadDe(rin.value); draw(); } });
         rc.addEventListener("input", () => { items[i].cantidad = rc.value; });
         rc.addEventListener("blur", draw);
-        fila.querySelector(".rx").addEventListener("click", () => { items.splice(i, 1); if (!items.length) items.push({ insumo: "", cantidad: "", unidad: "" }); draw(); });
+        if (ru) { ru.addEventListener("input", () => { items[i].unidad = ru.value; }); ru.addEventListener("blur", draw); }
+        fila.querySelector(".rx").addEventListener("click", () => { items.splice(i, 1); if (!items.length) items.push({ insumo: "", cantidad: "", unidad: "", modo: "insumo" }); draw(); });
       });
 
       cont.querySelector("#volver").addEventListener("click", () => { editando = null; pintar(); });
