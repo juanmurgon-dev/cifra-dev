@@ -26,6 +26,7 @@ export const state = {
   requisiciones: [],
   costosPlatillo: [],   // costo directo por platillo (para el margen)
   recetas: [],          // recetas: platillo/preparación → insumos + cantidad
+  recetasFicha: [],     // ficha técnica: categoría, tiempo de prep, procedimiento
   perfil: { nombre: "", email: "", cargado: false },
   config: { presupuestoSemanal: 35000, presupuestoPorArea: {} },
   orgId: null,          // id del restaurante (multi-tenant); null = single-tenant
@@ -148,6 +149,28 @@ async function cargarRecetas() {
   const { data, error } = await supabase.from("recetas").select("*");
   if (!error && data) { state.recetas = data; notify(); }
 }
+async function cargarRecetasFicha() {
+  const { data, error } = await supabase.from("recetas_ficha").select("*");
+  if (!error && data) { state.recetasFicha = data; notify(); }
+}
+
+// Datos de ficha (categoría, tiempo, procedimiento) de una receta.
+export function fichaDe(producto) {
+  return (state.recetasFicha || []).find((f) => f.producto === producto)
+    || { producto, categoria: "", tiempo: 0, procedimiento: "" };
+}
+export async function guardarFicha(producto, f) {
+  const row = {
+    producto,
+    categoria: String((f && f.categoria) || "").slice(0, 60),
+    tiempo: num(f && f.tiempo) || 0,
+    procedimiento: String((f && f.procedimiento) || "").slice(0, 4000),
+    actualizado: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("recetas_ficha").upsert(row);
+  if (error) throw error;
+  await cargarRecetasFicha();
+}
 
 const round2 = (n) => Math.round((num(n) || 0) * 100) / 100;
 
@@ -221,10 +244,15 @@ export function unidadInsumo(nombre) {
 // Costo de un renglón: cantidad × (ajuste por merma) × conversión de unidad × costo por unidad de compra.
 // Ej.: 80 g de queso a $176/kg → 80 × (g→kg = 0.001) × 176 = 14.08. La merma sube el costo
 // (si usas 100 g de algo con 20% de merma, compras 125 g → cuesta más).
+// Se costea la CANTIDAD BRUTA (lo que sacas del almacén, que es lo que pagas).
+// La merma NO baja el costo: sirve para saber cuánto queda útil (cantidad neta).
 export function costoLinea(insumo, cantidad, unidad, merma, seen) {
+  return num(cantidad) * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
+}
+// Cantidad neta (aprovechable) después de la merma.
+export function cantidadNeta(cantidad, merma) {
   const m = Math.min(99, Math.max(0, num(merma) || 0));
-  const factorMerma = 1 / (1 - m / 100);
-  return num(cantidad) * factorMerma * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
+  return num(cantidad) * (1 - m / 100);
 }
 
 // Costo total de la receta (precios de compra actuales + conversión de unidades).
@@ -261,6 +289,7 @@ export async function guardarReceta(producto, items, opts) {
     if (error) throw error;
   }
   await cargarRecetas();
+  if (opts.ficha) { try { await guardarFicha(producto, opts.ficha); } catch (e) { console.warn("ficha:", e); } }
   if (opts.es_preparacion) await recalcularTodos();          // afecta a los platillos que la usan
   else await guardarCostoPlatillo(producto, round2(costoDeReceta(producto)));
 }
@@ -417,7 +446,7 @@ export async function init() {
   arrancado = true;
   // allSettled: aunque una consulta falle, la app SIEMPRE deja de estar "cargando".
   await cargarMiOrg();  // primero: define single vs multi-tenant y el orgId
-  await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas()]);
+  await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas(), cargarRecetasFicha()]);
   try { await recalcularTodos(); } catch (e) { /* recetas o precios aún no disponibles */ }
   state.listo = true;
   notify();
