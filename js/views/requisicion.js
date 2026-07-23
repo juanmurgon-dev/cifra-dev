@@ -334,6 +334,7 @@ export function render(el) {
       <div class="fila" style="margin-top:12px;gap:8px;flex-wrap:wrap">
         <button class="btn" id="rqWa">📋 Copiar para WhatsApp</button>
         <button class="btn sec" id="rqCsv">⬇ Exportar CSV</button>
+        <button class="btn sec" id="rqPdf" title="Abre la impresión: elige 'Guardar como PDF'">📄 Guardar PDF</button>
       </div>
       <button class="btn sec" id="rqDel" style="margin-top:10px;color:var(--rojo)">Borrar esta requisición</button>
     </div>`;
@@ -363,6 +364,7 @@ export function render(el) {
     });
     cont.querySelector("#rqWa").addEventListener("click", copiarWa);
     cont.querySelector("#rqCsv").addEventListener("click", exportarCsv);
+    cont.querySelector("#rqPdf").addEventListener("click", exportarPdf);
     cont.querySelector("#rqDel").addEventListener("click", borrar);
   }
 
@@ -438,6 +440,66 @@ export function render(el) {
         filas.push([prov, it.nombre, num(it.cantidad), it.unidad, num(it.precio), montoDe(it)]);
     descargarCSV("requisicion-" + hoyTxt().replace(" ", "-"),
       ["Proveedor", "Insumo", "Cantidad", "Unidad", "Precio unit.", "Monto"], filas);
+  }
+
+  // Genera un documento con formato y abre la impresión del sistema, donde
+  // eliges "Guardar como PDF" (funciona en Android, iPhone y computadora).
+  function exportarPdf() {
+    const e = estatusInfo(derivar(editing.items));
+    const fecha = hoyTxt();
+    let filas = "";
+    for (const [prov, list] of grupos()) {
+      filas += `<tr class="prov"><td colspan="5">${esc(prov)}</td></tr>`;
+      for (const it of list) {
+        filas += `<tr>
+          <td class="c">${it.estatus === "pedido" ? "✔" : "○"}</td>
+          <td>${esc(it.nombre)}</td>
+          <td class="c">${num(it.cantidad)} ${esc(it.unidad || "")}</td>
+          <td class="r">${num(it.precio) ? money(num(it.precio)) : "—"}</td>
+          <td class="r">${num(it.precio) ? money(montoDe(it)) : "—"}</td>
+        </tr>`;
+      }
+      filas += `<tr class="sub"><td colspan="4" class="r">Subtotal ${esc(prov)}</td><td class="r">${money(totalDe(list))}</td></tr>`;
+    }
+
+    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+      <title>Requisicion-${esc(fecha.replace(/ /g, "-"))}</title>
+      <style>
+        *{box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#22201a;margin:22px}
+        h1{font-size:20px;margin:0 0 2px;color:#0e3a39}
+        .meta{color:#6f6a5c;font-size:12px;margin-bottom:16px}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        th{text-align:left;border-bottom:2px solid #0e3a39;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#0e3a39}
+        td{padding:6px 4px;border-bottom:1px solid #eee}
+        tr.prov td{background:#f4efe2;font-weight:700;color:#0e3a39;padding-top:9px}
+        tr.sub td{font-weight:700;border-bottom:2px solid #ddd;color:#6f6a5c}
+        .c{text-align:center}.r{text-align:right}
+        .total{margin-top:16px;text-align:right;font-size:16px;font-weight:800;color:#0e3a39}
+        .pie{margin-top:26px;color:#a8a296;font-size:10px;text-align:center}
+        @media print{ body{margin:12mm} tr{page-break-inside:avoid} }
+      </style></head><body>
+      <h1>Requisición de compras</h1>
+      <div class="meta">${esc(fecha)} · ${esc(e.t)} · ${editing.items.length} insumo${editing.items.length === 1 ? "" : "s"}</div>
+      <table>
+        <thead><tr><th></th><th>Insumo</th><th class="c">Cantidad</th><th class="r">Precio</th><th class="r">Monto</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+      <div class="total">TOTAL: ${money(totalDe(editing.items))}</div>
+      <div class="pie">Generado con Platify</div>
+    </body></html>`;
+
+    const ifr = document.createElement("iframe");
+    ifr.setAttribute("aria-hidden", "true");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0";
+    document.body.appendChild(ifr);
+    const doc = ifr.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => {
+      try { ifr.contentWindow.focus(); ifr.contentWindow.print(); }
+      catch (err) { alert("No pude abrir la impresión en este dispositivo."); }
+      setTimeout(() => { try { ifr.remove(); } catch (e2) {} }, 60000); // no quitarlo antes de imprimir
+    }, 350);
   }
 
   async function borrar() {
