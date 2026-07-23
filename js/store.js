@@ -25,6 +25,7 @@ export const state = {
   gastosFijos: [],
   requisiciones: [],
   costosPlatillo: [],   // costo directo por platillo (para el margen)
+  recetas: [],          // recetas: platillo/preparación → insumos + cantidad
   perfil: { nombre: "", email: "", cargado: false },
   config: { presupuestoSemanal: 35000, presupuestoPorArea: {} },
   orgId: null,          // id del restaurante (multi-tenant); null = single-tenant
@@ -141,6 +142,98 @@ export async function borrarCostoPlatillo(producto) {
   await cargarCostosPlatillo();
 }
 
+// ─── RECETAS + COSTEO (cruza recetas × precios de compra) ──────────────
+async function cargarRecetas() {
+  // La tabla puede no existir aún (si no corrieron recetas-inventario.sql).
+  const { data, error } = await supabase.from("recetas").select("*");
+  if (!error && data) { state.recetas = data; notify(); }
+}
+
+const round2 = (n) => Math.round((num(n) || 0) * 100) / 100;
+
+// Precio (última compra) de un insumo por nombre.
+export function precioInsumo(nombre) {
+  const key = String(nombre || "").trim().toLowerCase();
+  const hit = preciosPorInsumo().find((i) => i.nombre.toLowerCase() === key);
+  return hit ? num(hit.precioActual) : 0;
+}
+
+// Renglones de la receta de un platillo o preparación.
+export function recetasDe(producto) {
+  return (state.recetas || []).filter((r) => r.producto === producto);
+}
+
+// ¿'nombre' es una preparación base (sub-receta)?
+export function esPreparacion(nombre) {
+  return (state.recetas || []).some((r) => r.producto === nombre && r.es_preparacion);
+}
+function rendimientoDe(nombre) {
+  const f = (state.recetas || []).find((r) => r.producto === nombre && r.es_preparacion);
+  return f && num(f.rendimiento) > 0 ? num(f.rendimiento) : 1;
+}
+
+// Costo por unidad de un insumo, resolviendo preparaciones (recursivo, anti-ciclos).
+export function costoInsumo(nombre, seen) {
+  seen = seen || new Set();
+  if (esPreparacion(nombre)) {
+    if (seen.has(nombre)) return 0;
+    seen.add(nombre);
+    return costoDeReceta(nombre, seen) / rendimientoDe(nombre);
+  }
+  return precioInsumo(nombre);
+}
+
+// Costo total de la receta de un platillo/preparación (con los precios de compra actuales).
+export function costoDeReceta(producto, seen) {
+  let total = 0;
+  for (const r of recetasDe(producto)) total += num(r.cantidad) * costoInsumo(r.insumo, seen);
+  return total;
+}
+
+// Guarda la receta completa (reemplaza sus renglones) y recalcula su costo.
+export async function guardarReceta(producto, items, opts) {
+  opts = opts || {};
+  await supabase.from("recetas").delete().eq("producto", producto);
+  const filas = (items || []).filter((i) => i.insumo && num(i.cantidad) > 0).map((i) => ({
+    producto,
+    insumo: i.insumo,
+    cantidad: num(i.cantidad),
+    unidad: i.unidad || "",
+    es_preparacion: !!opts.es_preparacion,
+    rendimiento: opts.es_preparacion ? (num(opts.rendimiento) || 1) : 1,
+  }));
+  if (filas.length) {
+    const { error } = await supabase.from("recetas").insert(filas);
+    if (error) throw error;
+  }
+  await cargarRecetas();
+  if (opts.es_preparacion) await recalcularTodos();          // afecta a los platillos que la usan
+  else await guardarCostoPlatillo(producto, round2(costoDeReceta(producto)));
+}
+
+export async function borrarReceta(producto) {
+  const { error } = await supabase.from("recetas").delete().eq("producto", producto);
+  if (error) throw error;
+  await cargarRecetas();
+}
+
+// Recalcula costos_platillo de todos los platillos con receta usando los precios
+// de compra actuales; solo escribe los que cambiaron. Así el margen se actualiza
+// solo cuando cambian tus compras, sin recapturar nada.
+export async function recalcularTodos() {
+  const actuales = mapaCostos();
+  const platillos = [...new Set((state.recetas || []).filter((r) => !r.es_preparacion).map((r) => r.producto))];
+  let cambios = 0;
+  for (const p of platillos) {
+    const nuevo = round2(costoDeReceta(p));
+    if (round2(actuales.get(p)) !== nuevo) {
+      await supabase.from("costos_platillo").upsert({ producto: p, costo: nuevo, actualizado: new Date().toISOString() });
+      cambios++;
+    }
+  }
+  if (cambios) await cargarCostosPlatillo();
+}
+
 async function cargarRequisiciones() {
   // La tabla puede no existir aún (si no corren requisiciones.sql).
   const { data, error } = await supabase.from("requisiciones").select("*").order("creado_en", { ascending: false });
@@ -250,7 +343,8 @@ export async function init() {
   arrancado = true;
   // allSettled: aunque una consulta falle, la app SIEMPRE deja de estar "cargando".
   await cargarMiOrg();  // primero: define single vs multi-tenant y el orgId
-  await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo()]);
+  await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas()]);
+  try { await recalcularTodos(); } catch (e) { /* recetas o precios aún no disponibles */ }
   state.listo = true;
   notify();
   // Fija la base de la meta UNA sola vez, para que las semanas viejas queden
