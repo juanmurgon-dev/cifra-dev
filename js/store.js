@@ -218,28 +218,40 @@ export function unidadInsumo(nombre) {
   return hit ? (hit.unidad || "") : "";
 }
 
-// Costo de un renglón: cantidad × conversión de unidad × costo por unidad de compra.
-// Ej.: 80 g de queso a $176/kg → 80 × (g→kg = 0.001) × 176 = 14.08 (como tu hoja de costeo).
-export function costoLinea(insumo, cantidad, unidad, seen) {
-  return num(cantidad) * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
+// Costo de un renglón: cantidad × (ajuste por merma) × conversión de unidad × costo por unidad de compra.
+// Ej.: 80 g de queso a $176/kg → 80 × (g→kg = 0.001) × 176 = 14.08. La merma sube el costo
+// (si usas 100 g de algo con 20% de merma, compras 125 g → cuesta más).
+export function costoLinea(insumo, cantidad, unidad, merma, seen) {
+  const m = Math.min(99, Math.max(0, num(merma) || 0));
+  const factorMerma = 1 / (1 - m / 100);
+  return num(cantidad) * factorMerma * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
 }
 
 // Costo total de la receta (precios de compra actuales + conversión de unidades).
 export function costoDeReceta(producto, seen) {
   let total = 0;
-  for (const r of recetasDe(producto)) total += costoLinea(r.insumo, r.cantidad, r.unidad, seen);
+  for (const r of recetasDe(producto)) total += costoLinea(r.insumo, r.cantidad, r.unidad, r.merma, seen);
   return total;
+}
+
+// Porciones que rinde la receta de un platillo (para costo por porción).
+export function porcionesDe(producto) {
+  const f = (state.recetas || []).find((r) => r.producto === producto);
+  return f && num(f.porciones) > 0 ? num(f.porciones) : 1;
 }
 
 // Guarda la receta completa (reemplaza sus renglones) y recalcula su costo.
 export async function guardarReceta(producto, items, opts) {
   opts = opts || {};
   await supabase.from("recetas").delete().eq("producto", producto);
+  const porciones = num(opts.porciones) > 0 ? num(opts.porciones) : 1;
   const filas = (items || []).filter((i) => i.insumo && num(i.cantidad) > 0).map((i) => ({
     producto,
     insumo: i.insumo,
     cantidad: num(i.cantidad),
     unidad: i.unidad || "",
+    merma: num(i.merma) || 0,
+    porciones,
     es_preparacion: !!opts.es_preparacion,
     rendimiento: opts.es_preparacion ? (num(opts.rendimiento) || 1) : 1,
     rinde_unidad: opts.es_preparacion ? (opts.rinde_unidad || "") : "",
@@ -283,8 +295,9 @@ export async function importarRecetas(grupos) {
   for (const g of ordenados) {
     if (!g.producto) continue;
     await supabase.from("recetas").delete().eq("producto", g.producto);
+    const porc = num(g.porciones) > 0 ? num(g.porciones) : 1;
     const filas = (g.items || []).filter((i) => i.insumo && num(i.cantidad) > 0).map((i) => ({
-      producto: g.producto, insumo: i.insumo, cantidad: num(i.cantidad), unidad: i.unidad || "",
+      producto: g.producto, insumo: i.insumo, cantidad: num(i.cantidad), unidad: i.unidad || "", merma: num(i.merma) || 0, porciones: porc,
       es_preparacion: !!g.es_preparacion, rendimiento: g.es_preparacion ? (num(g.rendimiento) || 1) : 1,
       rinde_unidad: g.es_preparacion ? (g.rinde_unidad || "") : "",
     }));

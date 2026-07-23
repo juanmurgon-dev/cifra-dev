@@ -11,6 +11,7 @@ const num = (x) => { const n = parseFloat(x); return isNaN(n) ? 0 : n; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const colorMargen = (pct) => pct == null ? "var(--sub)" : pct >= 65 ? "var(--verde)" : pct >= 45 ? "#c9740a" : "var(--rojo)";
 const colorFood = (pct) => pct == null ? "var(--sub)" : pct <= 35 ? "var(--verde)" : pct <= 50 ? "#c9740a" : "var(--rojo)";
+const IVA = 0.16; // 16% — precio de venta público asumido con IVA; food cost sobre precio neto
 
 // Platillos (de productos_venta), agregados por nombre, con su precio de venta.
 function platillos() {
@@ -41,13 +42,14 @@ function gruposDesdeCSV(objs) {
     const prod = (o.platillo || o.receta || o.producto || "").trim();
     const insumo = (o.insumo || o.ingrediente || "").trim();
     if (!prod || !insumo) continue;
-    if (!map.has(prod)) map.set(prod, { producto: prod, es_preparacion: false, rendimiento: 1, rinde_unidad: "", items: [] });
+    if (!map.has(prod)) map.set(prod, { producto: prod, es_preparacion: false, rendimiento: 1, rinde_unidad: "", porciones: 1, items: [] });
     const g = map.get(prod);
     if (esSi(o.es_preparacion || o.preparacion || o.subreceta)) g.es_preparacion = true;
     if (o.rendimiento) g.rendimiento = n2(o.rendimiento) || 1;
+    if (o.porciones) g.porciones = n2(o.porciones) || 1;
     const ru = (o.rinde_unidad || o.unidad_rinde || o.unidad_preparacion || "").trim();
     if (ru) g.rinde_unidad = ru;
-    g.items.push({ insumo, cantidad: n2(o.cantidad), unidad: (o.unidad || "").trim() });
+    g.items.push({ insumo, cantidad: n2(o.cantidad), unidad: (o.unidad || "").trim(), merma: n2(o.merma) });
   }
   return [...map.values()];
 }
@@ -55,17 +57,17 @@ function gruposDesdeCSV(objs) {
 // Descarga un CSV con el formato correcto y ejemplos, para armar las recetas ahí.
 function descargarPlantilla() {
   descargarCSV("plantilla-recetas-platify",
-    ["platillo", "insumo", "cantidad", "unidad", "es_preparacion", "rendimiento", "rinde_unidad"],
+    ["platillo", "insumo", "cantidad", "unidad", "merma", "porciones", "es_preparacion", "rendimiento", "rinde_unidad"],
     [
-      ["Omelette de Carnes", "huevo", "120", "g", "", "", ""],
-      ["Omelette de Carnes", "chorizo", "20", "g", "", "", ""],
-      ["Omelette de Carnes", "jamon", "20", "g", "", "", ""],
-      ["Omelette de Carnes", "frijol", "100", "g", "", "", ""],
-      ["Omelette de Carnes", "queso monterrey", "80", "g", "", "", ""],
-      ["Omelette de Carnes", "papa campesina", "100", "g", "", "", ""],
-      ["Omelette de Carnes", "brote de rabano", "2", "g", "", "", ""],
-      ["Salsa verde", "tomate verde", "1000", "g", "si", "2", "L"],
-      ["Salsa verde", "chile serrano", "100", "g", "si", "2", "L"],
+      ["Omelette de Carnes", "huevo", "120", "g", "", "1", "", "", ""],
+      ["Omelette de Carnes", "chorizo", "20", "g", "", "1", "", "", ""],
+      ["Omelette de Carnes", "jamon", "20", "g", "", "1", "", "", ""],
+      ["Omelette de Carnes", "frijol", "100", "g", "", "1", "", "", ""],
+      ["Omelette de Carnes", "queso monterrey", "80", "g", "", "1", "", "", ""],
+      ["Omelette de Carnes", "papa campesina", "100", "g", "10", "1", "", "", ""],
+      ["Omelette de Carnes", "brote de rabano", "2", "g", "", "1", "", "", ""],
+      ["Salsa verde", "tomate verde", "1000", "g", "", "", "si", "2", "L"],
+      ["Salsa verde", "chile serrano", "100", "g", "", "", "si", "2", "L"],
     ]
   );
 }
@@ -184,11 +186,13 @@ export function render(el) {
   function editor(cont, nombre, esPrep) {
     const existentes = nombre ? store.recetasDe(nombre) : [];
     const filaPrep = esPrep && nombre ? store.state.recetas.find((r) => r.producto === nombre && r.es_preparacion) : null;
-    let items = existentes.map((r) => ({ insumo: r.insumo, cantidad: r.cantidad, unidad: r.unidad || "", modo: store.esPreparacion(r.insumo) ? "subreceta" : "insumo" }));
-    if (!items.length) items = [{ insumo: "", cantidad: "", unidad: "", modo: "insumo" }];
+    let items = existentes.map((r) => ({ insumo: r.insumo, cantidad: r.cantidad, unidad: r.unidad || "", merma: r.merma || "", modo: store.esPreparacion(r.insumo) ? "subreceta" : "insumo" }));
+    if (!items.length) items = [{ insumo: "", cantidad: "", unidad: "", merma: "", modo: "insumo" }];
     let nom = nombre || "";
     let rendimiento = filaPrep ? filaPrep.rendimiento : 1;
     let unidadRinde = esPrep && nombre ? store.unidadPreparacion(nombre) : "";
+    let porciones = !esPrep && nombre ? store.porcionesDe(nombre) : 1;
+    let objetivo = 30; // food cost objetivo % (para el precio sugerido)
 
     const insumosLista = store.preciosPorInsumo();
     const datalist = `<datalist id="dl-insumos">${insumosLista.map((i) => `<option value="${esc(i.nombre)}">`).join("")}${preparaciones().filter((p) => p !== nom).map((p) => `<option value="${esc(p)}">`).join("")}</datalist>`;
@@ -202,11 +206,16 @@ export function render(el) {
     }
 
     function draw() {
-      const costoTotal = items.reduce((a, it) => a + num(it.cantidad) * store.costoInsumo(it.insumo), 0);
+      const costoTotal = items.reduce((a, it) => a + store.costoLinea(it.insumo, it.cantidad, it.unidad || unidadDe(it.insumo), it.merma), 0);
       const costoUnit = esPrep && num(rendimiento) > 0 ? costoTotal / num(rendimiento) : costoTotal;
-      const margen = precioVenta - costoTotal;
-      const margPct = precioVenta > 0 ? margen / precioVenta * 100 : null;
-      const foodPct = precioVenta > 0 ? costoTotal / precioVenta * 100 : null;
+      const nPorc = num(porciones) > 0 ? num(porciones) : 1;
+      const costoPorcion = costoTotal / nPorc;
+      const precioNeto = precioVenta / (1 + IVA);            // precio sin IVA
+      const margen = precioNeto - costoPorcion;
+      const margPct = precioNeto > 0 ? margen / precioNeto * 100 : null;
+      const foodPct = precioNeto > 0 ? costoPorcion / precioNeto * 100 : null;
+      const sugSinIva = num(objetivo) > 0 ? costoPorcion / (num(objetivo) / 100) : 0;
+      const sugConIva = sugSinIva * (1 + IVA);
 
       cont.innerHTML = `
         ${datalist}
@@ -220,7 +229,8 @@ export function render(el) {
                  <div style="flex:1"><label class="sub">Unidad que rinde</label><input id="urinde" placeholder="L, kg, pza" value="${esc(unidadRinde)}" /></div>
                </div>`
             : `<h2 style="margin:0 0 2px">${esc(nombre)}</h2>
-               <p class="sub" style="margin-top:0">${plat && plat.categoria ? esc(plat.categoria) + " · " : ""}${precioVenta ? "se vende en " + money(precioVenta) : "sin precio de venta"}</p>`}
+               <p class="sub" style="margin-top:0">${plat && plat.categoria ? esc(plat.categoria) + " · " : ""}${precioVenta ? "se vende en " + money(precioVenta) + " c/IVA" : "sin precio de venta"}</p>
+               <div class="fila" style="gap:8px;align-items:center;margin-top:6px"><span class="sub">Rinde</span><input id="porc" type="number" min="1" step="any" value="${esc(String(porciones))}" style="width:64px;text-align:center" /><span class="sub">porciones</span></div>`}
 
           <div style="margin-top:12px;font-weight:700;font-size:13px">Ingredientes</div>
           <div id="rows"></div>
@@ -233,9 +243,14 @@ export function render(el) {
             <div class="fila" style="justify-content:space-between"><span class="sub">Costo de la receta</span><b>${money(costoTotal)}</b></div>
             ${esPrep
               ? `<div class="fila" style="justify-content:space-between"><span class="sub">Costo por ${esc(unidadRinde || "unidad")}</span><b>${money(costoUnit)}</b></div>`
-              : `<div class="fila" style="justify-content:space-between"><span class="sub">Precio de venta</span><b>${money(precioVenta)}</b></div>
+              : `<div class="fila" style="justify-content:space-between"><span class="sub">Costo por porción</span><b>${money(costoPorcion)}</b></div>
+                 <div class="fila" style="justify-content:space-between"><span class="sub">Precio venta</span><b>${money(precioVenta)}${precioVenta ? ` · ${money(precioNeto)} s/IVA` : ""}</b></div>
                  <div class="fila" style="justify-content:space-between"><span class="sub">Food cost</span><b style="color:${colorFood(foodPct)}">${foodPct != null ? foodPct.toFixed(0) + "%" : "—"}</b></div>
-                 <div class="fila" style="justify-content:space-between"><span class="sub">Margen neto</span><b style="color:${colorMargen(margPct)}">${money(margen)}${margPct != null ? " · " + margPct.toFixed(0) + "%" : ""}</b></div>`}
+                 <div class="fila" style="justify-content:space-between"><span class="sub">Margen (por porción)</span><b style="color:${colorMargen(margPct)}">${money(margen)}${margPct != null ? " · " + margPct.toFixed(0) + "%" : ""}</b></div>
+                 <div class="fila" style="justify-content:space-between;align-items:center;margin-top:6px;border-top:1px dashed var(--linea);padding-top:8px">
+                   <span class="sub">Precio sugerido a <input id="obj" type="number" min="1" max="99" value="${esc(String(objetivo))}" style="width:42px;padding:2px 4px;text-align:center;font-size:12px" />% food cost</span>
+                   <b style="color:var(--verde)">${money(sugConIva)}<span class="sub" style="font-weight:400"> c/IVA</span></b>
+                 </div>`}
           </div>
 
           <button class="btn" id="guardar" style="margin-top:14px">Guardar receta</button>
@@ -244,18 +259,21 @@ export function render(el) {
         </div>`;
 
       const rows = cont.querySelector("#rows");
-      rows.innerHTML = items.map((it, i) => {
+      const encab = `<div class="fila" style="gap:5px;font-size:10px;color:var(--sub);margin-top:4px;text-transform:uppercase;letter-spacing:.02em">
+        <span style="flex:2">Insumo</span><span style="width:50px;text-align:center">Cant</span><span style="width:38px;text-align:center">Un</span><span style="width:40px;text-align:center">Merma</span><span style="width:52px;text-align:right">Costo</span><span style="width:22px"></span></div>`;
+      rows.innerHTML = encab + items.map((it, i) => {
         const uLinea = it.unidad || unidadDe(it.insumo);
-        const linea = store.costoLinea(it.insumo, it.cantidad, uLinea);
+        const linea = store.costoLinea(it.insumo, it.cantidad, uLinea, it.merma);
         const campo = it.modo === "subreceta"
           ? `<select class="rin" style="flex:2;min-width:0"><option value="">— elige subreceta —</option>${prepsDisp().map((p) => `<option value="${esc(p)}"${p === it.insumo ? " selected" : ""}>${esc(p)}</option>`).join("")}</select>`
           : `<input class="rin" list="dl-insumos" placeholder="Insumo" value="${esc(it.insumo)}" style="flex:2;min-width:0" />`;
         return `
-          <div class="fila" style="gap:5px;align-items:center;margin-top:8px" data-i="${i}">
+          <div class="fila" style="gap:5px;align-items:center;margin-top:6px" data-i="${i}">
             ${campo}
-            <input class="rc" type="number" inputmode="decimal" min="0" step="any" placeholder="Cant." value="${esc(String(it.cantidad))}" style="width:54px;flex:0 0 auto;min-width:0" />
-            <input class="ru" value="${esc(uLinea)}" placeholder="u" title="unidad: g, ml, pza…" style="width:40px;flex:0 0 auto;min-width:0;text-align:center;font-size:12px" />
-            <span class="sub" style="width:56px;text-align:right;font-size:12px">${linea ? money(linea) : ""}${it.modo === "subreceta" ? " 🧪" : ""}</span>
+            <input class="rc" type="number" inputmode="decimal" min="0" step="any" placeholder="Cant." value="${esc(String(it.cantidad))}" style="width:50px;flex:0 0 auto;min-width:0" />
+            <input class="ru" value="${esc(uLinea)}" placeholder="u" title="unidad: g, ml, pza…" style="width:38px;flex:0 0 auto;min-width:0;text-align:center;font-size:12px" />
+            <input class="rm" type="number" min="0" max="99" placeholder="0" value="${esc(String(it.merma || ""))}" title="merma % (desperdicio)" style="width:40px;flex:0 0 auto;min-width:0;text-align:center;font-size:12px" />
+            <span class="sub" style="width:52px;text-align:right;font-size:12px">${linea ? money(linea) : ""}${it.modo === "subreceta" ? " 🧪" : ""}</span>
             <button class="rx" title="Quitar" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:18px;width:22px">×</button>
           </div>`;
       }).join("");
@@ -263,23 +281,27 @@ export function render(el) {
       // eventos de filas
       rows.querySelectorAll("[data-i]").forEach((fila) => {
         const i = +fila.dataset.i;
-        const rin = fila.querySelector(".rin"), rc = fila.querySelector(".rc"), ru = fila.querySelector(".ru");
+        const rin = fila.querySelector(".rin"), rc = fila.querySelector(".rc"), ru = fila.querySelector(".ru"), rm = fila.querySelector(".rm");
         rin.addEventListener("change", () => { items[i].insumo = rin.value; items[i].unidad = unidadDe(rin.value); draw(); });
         rin.addEventListener("blur", () => { if (items[i].insumo !== rin.value) { items[i].insumo = rin.value; items[i].unidad = unidadDe(rin.value); draw(); } });
         rc.addEventListener("input", () => { items[i].cantidad = rc.value; });
         rc.addEventListener("blur", draw);
         if (ru) { ru.addEventListener("input", () => { items[i].unidad = ru.value; }); ru.addEventListener("blur", draw); }
-        fila.querySelector(".rx").addEventListener("click", () => { items.splice(i, 1); if (!items.length) items.push({ insumo: "", cantidad: "", unidad: "", modo: "insumo" }); draw(); });
+        if (rm) { rm.addEventListener("input", () => { items[i].merma = rm.value; }); rm.addEventListener("blur", draw); }
+        fila.querySelector(".rx").addEventListener("click", () => { items.splice(i, 1); if (!items.length) items.push({ insumo: "", cantidad: "", unidad: "", merma: "", modo: "insumo" }); draw(); });
       });
 
       cont.querySelector("#volver").addEventListener("click", () => { editando = null; pintar(); });
-      cont.querySelector("#add").addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", modo: "insumo" }); draw(); });
+      cont.querySelector("#add").addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", merma: "", modo: "insumo" }); draw(); });
       const ap = cont.querySelector("#addprep");
-      if (ap) ap.addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", modo: "subreceta" }); draw(); });
+      if (ap) ap.addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", merma: "", modo: "subreceta" }); draw(); });
       if (esPrep) {
         cont.querySelector("#nom").addEventListener("input", (e) => { nom = e.target.value; });
         cont.querySelector("#rend").addEventListener("input", (e) => { rendimiento = e.target.value; });
         cont.querySelector("#urinde").addEventListener("input", (e) => { unidadRinde = e.target.value; });
+      } else {
+        const op = cont.querySelector("#porc"); if (op) { op.addEventListener("input", (e) => { porciones = e.target.value; }); op.addEventListener("change", draw); }
+        const ob = cont.querySelector("#obj"); if (ob) { ob.addEventListener("input", (e) => { objetivo = e.target.value; }); ob.addEventListener("change", draw); }
       }
       cont.querySelector("#guardar").addEventListener("click", guardar);
       const bb = cont.querySelector("#borrar");
@@ -294,8 +316,8 @@ export function render(el) {
       if (!limpios.length) { msg.textContent = "Agrega al menos un ingrediente con cantidad."; return; }
       msg.textContent = "Guardando…";
       try {
-        await store.guardarReceta(destino, limpios.map((it) => ({ insumo: it.insumo.trim(), cantidad: num(it.cantidad), unidad: it.unidad || unidadDe(it.insumo) })),
-          esPrep ? { es_preparacion: true, rendimiento: num(rendimiento) || 1, rinde_unidad: unidadRinde } : {});
+        await store.guardarReceta(destino, limpios.map((it) => ({ insumo: it.insumo.trim(), cantidad: num(it.cantidad), unidad: it.unidad || unidadDe(it.insumo), merma: num(it.merma) || 0 })),
+          esPrep ? { es_preparacion: true, rendimiento: num(rendimiento) || 1, rinde_unidad: unidadRinde } : { porciones: num(porciones) || 1 });
         editando = null; shell();
       } catch (e) { msg.textContent = "Error: " + (e.message || e); }
     }
