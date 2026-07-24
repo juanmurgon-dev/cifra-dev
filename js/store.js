@@ -154,17 +154,22 @@ async function cargarRecetasFicha() {
   if (!error && data) { state.recetasFicha = data; notify(); }
 }
 
-// Datos de ficha (categoría, tiempo, procedimiento) de una receta.
+// Datos de ficha (categoría, tiempo, pasos, foto) de una receta.
 export function fichaDe(producto) {
-  return (state.recetasFicha || []).find((f) => f.producto === producto)
-    || { producto, categoria: "", tiempo: 0, procedimiento: "" };
+  const f = (state.recetasFicha || []).find((x) => x.producto === producto);
+  return f || { producto, categoria: "", tiempo: 0, procedimiento: "", pasos: [], foto: "" };
 }
 export async function guardarFicha(producto, f) {
+  const pasos = Array.isArray(f && f.pasos)
+    ? f.pasos.slice(0, 40).map((p) => ({ descripcion: String(p.descripcion || "").slice(0, 500), tiempo: num(p.tiempo) || 0 }))
+    : [];
   const row = {
     producto,
     categoria: String((f && f.categoria) || "").slice(0, 60),
-    tiempo: num(f && f.tiempo) || 0,
-    procedimiento: String((f && f.procedimiento) || "").slice(0, 4000),
+    tiempo: pasos.length ? pasos.reduce((a, p) => a + (num(p.tiempo) || 0), 0) : (num(f && f.tiempo) || 0),
+    procedimiento: pasos.map((p) => p.descripcion).join("\n").slice(0, 4000), // compat
+    pasos,
+    foto: String((f && f.foto) || "").slice(0, 800000),
     actualizado: new Date().toISOString(),
   };
   const { error } = await supabase.from("recetas_ficha").upsert(row);

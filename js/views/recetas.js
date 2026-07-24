@@ -15,6 +15,25 @@ const colorFood = (pct) => pct == null ? "var(--sub)" : pct <= 35 ? "var(--verde
 const IVA = 0.16; // precio de venta al público asumido con IVA; food cost sobre precio neto
 const redondo = (n) => Math.round(n * 100) / 100;
 
+// Reduce una foto (para que pese poco antes de guardarla en base64).
+function comprimirImagen(file, max = 700) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > max || height > max) { const s = max / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s); }
+        const c = document.createElement("canvas"); c.width = width; c.height = height;
+        c.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(c.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = reject; img.src = r.result;
+    };
+    r.onerror = reject; r.readAsDataURL(file);
+  });
+}
+
 // Platillos (de productos_venta), agregados por nombre, con su precio de venta.
 function platillos() {
   const m = new Map();
@@ -191,7 +210,7 @@ export function render(el) {
     const existentes = nombre ? store.recetasDe(nombre) : [];
     const filaPrep = esPrep && nombre ? store.state.recetas.find((r) => r.producto === nombre && r.es_preparacion) : null;
     const plat = !esPrep ? platillos().find((p) => p.producto === nombre) : null;
-    const fichaAct = nombre ? store.fichaDe(nombre) : { categoria: "", tiempo: 0, procedimiento: "" };
+    const fichaAct = nombre ? store.fichaDe(nombre) : { categoria: "", tiempo: 0, procedimiento: "", pasos: [], foto: "" };
 
     let items = existentes.map((r) => ({ insumo: r.insumo, cantidad: r.cantidad, unidad: r.unidad || "", merma: r.merma || "", modo: store.esPreparacion(r.insumo) ? "subreceta" : "insumo" }));
     if (!items.length) items = [{ insumo: "", cantidad: "", unidad: "", merma: "", modo: "insumo" }];
@@ -202,7 +221,11 @@ export function render(el) {
     let objetivo = 30;
     let categoria = fichaAct.categoria || (plat ? plat.categoria : "");
     let tiempo = fichaAct.tiempo || "";
-    let procedimiento = fichaAct.procedimiento || "";
+    let pasos = Array.isArray(fichaAct.pasos) && fichaAct.pasos.length
+      ? fichaAct.pasos.map((p) => ({ descripcion: p.descripcion || "", tiempo: p.tiempo || "" }))
+      : String(fichaAct.procedimiento || "").split(/\n/).map((s) => s.trim()).filter(Boolean).map((d) => ({ descripcion: d, tiempo: "" }));
+    let foto = fichaAct.foto || "";
+    let pasoTmp = { descripcion: "", tiempo: "" };
 
     const precioVenta = plat ? plat.precio : 0;
     const insumosLista = store.preciosPorInsumo();
@@ -264,8 +287,22 @@ export function render(el) {
           </div>
 
           <div style="margin-top:18px;border-top:1px solid var(--linea);padding-top:12px">
-            <div class="sub" style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--verde);font-weight:700;margin-bottom:6px">Procedimiento</div>
-            <textarea id="proc" rows="5" placeholder="Un paso por línea:&#10;1. Batir los huevos…&#10;2. Saltear el chorizo…" style="width:100%;font-family:inherit;font-size:14px;padding:10px;border-radius:10px;border:1px solid var(--linea);resize:vertical">${esc(procedimiento)}</textarea>
+            <div class="sub" style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--verde);font-weight:700;margin-bottom:6px">Foto del platillo</div>
+            <label style="display:block;border:2px dashed var(--linea);border-radius:12px;padding:14px;text-align:center;cursor:pointer">
+              <input type="file" id="foto" accept="image/*" style="display:none" />
+              ${foto ? `<img src="${foto}" alt="platillo" style="max-width:100%;max-height:220px;border-radius:10px" />` : `<span class="sub">📸 Toca para subir una foto</span>`}
+            </label>
+            ${foto ? `<button class="btn sec chico" id="quitarFoto" style="margin-top:8px;color:var(--rojo)">Quitar foto</button>` : ""}
+          </div>
+
+          <div style="margin-top:18px;border-top:1px solid var(--linea);padding-top:12px">
+            <div class="sub" style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--verde);font-weight:700;margin-bottom:6px">Procedimiento (pasos)</div>
+            <div id="pasos"></div>
+            <div class="fila" style="gap:6px;margin-top:8px;align-items:flex-start">
+              <textarea id="pasoDesc" rows="2" placeholder="Describe el paso…" style="flex:1;font-family:inherit;font-size:14px;padding:8px;border-radius:10px;border:1px solid var(--linea);resize:vertical">${esc(pasoTmp.descripcion)}</textarea>
+              <input id="pasoMin" type="number" min="0" placeholder="min" value="${esc(String(pasoTmp.tiempo))}" style="width:52px;text-align:center" />
+              <button class="btn sec chico" id="pasoAdd" style="flex:0 0 auto">＋ Paso</button>
+            </div>
           </div>
 
           <button class="btn" id="guardar" style="margin-top:14px">💾 Guardar ficha</button>
@@ -323,7 +360,32 @@ export function render(el) {
       cont.querySelector("#add").addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", merma: "", modo: "insumo" }); draw(); });
       const ap = cont.querySelector("#addprep");
       if (ap) ap.addEventListener("click", () => { items.push({ insumo: "", cantidad: "", unidad: "", merma: "", modo: "subreceta" }); draw(); });
-      cont.querySelector("#proc").addEventListener("input", (e) => { procedimiento = e.target.value; });
+      // Foto
+      const fotoInput = cont.querySelector("#foto");
+      if (fotoInput) fotoInput.addEventListener("change", async (e) => {
+        const file = e.target.files && e.target.files[0]; if (!file) return;
+        try { foto = await comprimirImagen(file); draw(); } catch (err) { alert("No se pudo cargar la foto."); }
+      });
+      const qf = cont.querySelector("#quitarFoto");
+      if (qf) qf.addEventListener("click", () => { foto = ""; draw(); });
+
+      // Pasos numerados
+      const pasosEl = cont.querySelector("#pasos");
+      pasosEl.innerHTML = pasos.map((p, i) => `
+        <div class="fila" style="gap:8px;align-items:flex-start;margin-bottom:6px;background:var(--paper,#f4efe2);border-radius:10px;padding:8px 10px;border-left:3px solid var(--verde)">
+          <b style="color:var(--verde);font-size:12px;flex:0 0 auto">${i + 1}.</b>
+          <span style="flex:1;font-size:13px">${esc(p.descripcion)}${p.tiempo ? ` <span class="sub">· ${esc(String(p.tiempo))} min</span>` : ""}</span>
+          <button class="pasoDel" data-i="${i}" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:16px;flex:0 0 auto">×</button>
+        </div>`).join("");
+      pasosEl.querySelectorAll(".pasoDel").forEach((b) => b.addEventListener("click", () => { pasos.splice(+b.dataset.i, 1); draw(); }));
+      const pd = cont.querySelector("#pasoDesc"), pm = cont.querySelector("#pasoMin");
+      pd.addEventListener("input", (e) => { pasoTmp.descripcion = e.target.value; });
+      pm.addEventListener("input", (e) => { pasoTmp.tiempo = e.target.value; });
+      cont.querySelector("#pasoAdd").addEventListener("click", () => {
+        if (!pasoTmp.descripcion.trim()) return;
+        pasos.push({ descripcion: pasoTmp.descripcion.trim(), tiempo: num(pasoTmp.tiempo) || "" });
+        pasoTmp = { descripcion: "", tiempo: "" }; draw();
+      });
       if (esPrep) {
         cont.querySelector("#nom").addEventListener("input", (e) => { nom = e.target.value; });
         cont.querySelector("#rend").addEventListener("input", (e) => { rendimiento = e.target.value; });
@@ -347,7 +409,7 @@ export function render(el) {
       if (!limpios.length) { msg.textContent = "Agrega al menos un ingrediente con cantidad."; return; }
       msg.textContent = "Guardando…";
       try {
-        const ficha = { categoria, tiempo: num(tiempo), procedimiento };
+        const ficha = { categoria, tiempo: num(tiempo), pasos: pasos.filter((p) => p.descripcion.trim()), foto };
         await store.guardarReceta(
           destino,
           limpios.map((it) => ({ insumo: it.insumo.trim(), cantidad: num(it.cantidad), unidad: it.unidad || unidadDe(it.insumo), merma: num(it.merma) || 0 })),
