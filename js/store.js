@@ -622,20 +622,41 @@ export function totalTicket(t) {
   return s || num(t.total);
 }
 
-// Gasto del ticket sin IVA (total de compra) — para utilidad y reportes de gasto.
+// Desglosa un ticket en costo de venta (cv) vs operativo (op), y reparte el IVA
+// del ticket entre ambos según su proporción. Así el IVA que corresponde a los
+// insumos de "costo de venta" (ivaCV) SÍ se cuenta como parte de ese insumo,
+// y el IVA de lo operativo (ivaOp) queda del lado operativo.
+function desgloseTicket(t) {
+  const ls = t.lineas || [];
+  let cv = 0, op = 0, iva = 0;
+  for (const l of ls) {
+    const m = num(l.monto);
+    if (ES_IVA.test(l.descripcion || "")) { iva += m; continue; }
+    if (l.tipo === "costo de venta") cv += m; else op += m;
+  }
+  const base = cv + op;
+  const ivaCV = base > 0 ? iva * (cv / base) : 0;
+  return { cv, op, iva, ivaCV, ivaOp: iva - ivaCV };
+}
+
+// Gasto TOTAL del ticket (para utilidad): insumos + operativo + el IVA de los
+// insumos. El IVA de lo operativo no se cuenta (así lo pidió el usuario).
 export function gastoTicket(t) {
   const ls = t.lineas || [];
   if (!ls.length) return num(t.total);
-  return ls.reduce((a, l) => a + (ES_IVA.test(l.descripcion || "") ? 0 : num(l.monto)), 0);
+  const d = desgloseTicket(t);
+  return d.cv + d.op + d.ivaCV;
 }
 
-// Gasto VARIABLE del ticket: solo líneas de "costo de venta" (insumos que entran
-// al platillo). Excluye lo "operativo" (limpieza, servicios, IVA, gastos
-// generales). Es el gasto que se compara contra la META y con la venta (costo %).
+// Gasto VARIABLE del ticket: solo lo de "costo de venta" (insumos que entran al
+// platillo) MÁS el IVA que le corresponde a esos insumos. Excluye lo "operativo"
+// (limpieza, servicios, gastos generales) y su IVA. Es el gasto que se compara
+// contra la META y con la venta (costo %).
 export function gastoVariable(t) {
   const ls = t.lineas || [];
   if (!ls.length) return num(t.total);
-  return ls.reduce((a, l) => a + (l.tipo === "costo de venta" ? num(l.monto) : 0), 0);
+  const d = desgloseTicket(t);
+  return d.cv + d.ivaCV;
 }
 
 // Todas las líneas (con fecha del ticket) dentro de [desde, hasta] ISO inclusive
