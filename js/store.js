@@ -29,6 +29,8 @@ export const state = {
   recetasFicha: [],     // ficha técnica: categoría, tiempo de prep, procedimiento
   posTurno: null,       // turno de caja abierto (POS)
   posVentas: [],        // ventas del turno/día (POS)
+  posMesas: [],         // mesas del restaurante (layout)
+  posOrdenes: [],       // órdenes abiertas por mesa
   perfil: { nombre: "", email: "", cargado: false },
   config: { presupuestoSemanal: 35000, presupuestoPorArea: {} },
   orgId: null,          // id del restaurante (multi-tenant); null = single-tenant
@@ -392,6 +394,53 @@ export async function guardarVenta(v) {
   await cargarPosVentas(); return data;
 }
 
+// ── Mesas (layout) ──
+async function cargarMesas() {
+  const { data, error } = await supabase.from("pos_mesas").select("*").eq("activa", true).order("orden").order("nombre");
+  if (!error && data) { state.posMesas = data; notify(); }
+}
+export async function guardarMesa(nombre, zona) {
+  const maxO = state.posMesas.reduce((a, m) => Math.max(a, num(m.orden)), 0);
+  const { error } = await supabase.from("pos_mesas").insert({ nombre: String(nombre || "").slice(0, 40), zona: String(zona || "").slice(0, 40), orden: maxO + 1 });
+  if (error) throw error; await cargarMesas();
+}
+export async function borrarMesa(id) {
+  const { error } = await supabase.from("pos_mesas").update({ activa: false }).eq("id", id);
+  if (error) throw error; await cargarMesas();
+}
+
+// ── Órdenes abiertas (cuenta por mesa) ──
+async function cargarOrdenes() {
+  const { data, error } = await supabase.from("pos_ordenes").select("*").eq("estado", "abierta").order("abierta_en");
+  if (!error && data) { state.posOrdenes = data; notify(); }
+}
+export function ordenDeMesa(mesa) {
+  return (state.posOrdenes || []).find((o) => o.estado === "abierta" && o.tipo === "comedor" && o.mesa === mesa) || null;
+}
+export async function guardarOrden(o) {
+  const row = {
+    mesa: String(o.mesa || ""), tipo: o.tipo || "comedor", personas: num(o.personas) || 0,
+    items: o.items || [], total: num(o.total), estado: "abierta",
+    turno_id: state.posTurno ? state.posTurno.id : null, cajero: miNombre(), actualizada_en: new Date().toISOString(),
+  };
+  if (o.id) {
+    const { error } = await supabase.from("pos_ordenes").update(row).eq("id", o.id);
+    if (error) throw error; await cargarOrdenes(); return o.id;
+  }
+  const { data, error } = await supabase.from("pos_ordenes").insert(row).select().single();
+  if (error) throw error; await cargarOrdenes(); return data.id;
+}
+export async function borrarOrden(id) {
+  if (!id) return;
+  await supabase.from("pos_ordenes").delete().eq("id", id);
+  await cargarOrdenes();
+}
+export async function cobrarOrden(o, pago) {
+  await guardarVenta({ items: o.items, total: o.total, metodo: pago.metodo, recibido: pago.recibido, cambio: pago.cambio, tipo: o.tipo, mesa: o.mesa, personas: o.personas });
+  if (o.id) await supabase.from("pos_ordenes").update({ estado: "cobrada", actualizada_en: new Date().toISOString() }).eq("id", o.id);
+  await cargarOrdenes();
+}
+
 async function cargarRequisiciones() {
   // La tabla puede no existir aún (si no corren requisiciones.sql).
   const { data, error } = await supabase.from("requisiciones").select("*").order("creado_en", { ascending: false });
@@ -503,7 +552,7 @@ export async function init() {
   await cargarMiOrg();  // primero: define single vs multi-tenant y el orgId
   await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas(), cargarRecetasFicha()]);
   try { await recalcularTodos(); } catch (e) { /* recetas o precios aún no disponibles */ }
-  try { await cargarPosTurno(); await cargarPosVentas(); } catch (e) { /* POS aún no configurado */ }
+  try { await cargarPosTurno(); await cargarPosVentas(); await cargarMesas(); await cargarOrdenes(); } catch (e) { /* POS aún no configurado */ }
   state.listo = true;
   notify();
   // Fija la base de la meta UNA sola vez, para que las semanas viejas queden
