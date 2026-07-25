@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Platify POS</title>
+<meta name="theme-color" content="#0e3a39" />
+<link rel="manifest" href="manifest.webmanifest" />
+<style>
+  :root{ --green:#0e3a39; --teal:#2ec4b6; --orange:#ff9f1c; --cream:#ffeeb8; --paper:#f4f6f5; --ink:#22201a; --muted:#6f6a5c; --line:#e6ebea; --rojo:#c0563f; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--paper); color:var(--ink) }
+  button{ font-family:inherit; cursor:pointer }
+  input{ font-family:inherit; font-size:16px }
+  #app{ min-height:100vh }
+  .btn{ background:var(--teal); color:#063a37; border:none; border-radius:12px; padding:14px 18px; font-weight:800; font-size:16px }
+  .btn.sec{ background:#e7edec; color:var(--green) }
+  .btn.g{ background:var(--green); color:#fff }
+  /* Login */
+  .login{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--green); color:var(--cream); padding:24px }
+  .login .card{ width:min(360px,100%); text-align:center }
+  .login input{ width:100%; padding:14px; border-radius:12px; border:none; margin-bottom:10px }
+  .marca{ font-weight:800; font-size:2rem; letter-spacing:-.02em }
+  .marca .tri{ color:var(--orange) }
+  .err{ color:#ffb4a1; font-size:.9rem; min-height:1.2rem }
+  /* POS layout */
+  header.top{ position:sticky; top:0; z-index:20; background:var(--green); color:var(--cream); display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px }
+  header .marca{ font-size:1.25rem }
+  .pos{ display:grid; grid-template-columns:1fr 340px; gap:0; height:calc(100vh - 56px) }
+  @media (max-width:820px){ .pos{ grid-template-columns:1fr; height:auto } }
+  .menu{ padding:12px; overflow-y:auto }
+  .chips{ display:flex; gap:8px; overflow-x:auto; padding-bottom:10px; position:sticky; top:0; background:var(--paper) }
+  .chip{ flex-shrink:0; border:none; border-radius:20px; padding:9px 15px; font-weight:700; font-size:14px; background:#e7edec; color:var(--muted) }
+  .chip.act{ background:var(--green); color:#fff }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:8px }
+  .prod{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 12px; text-align:left; min-height:78px; display:flex; flex-direction:column; justify-content:space-between }
+  .prod b{ font-size:14px; color:var(--green); line-height:1.2 }
+  .prod .p{ color:var(--orange); font-weight:800; margin-top:6px }
+  /* Cuenta */
+  .cuenta{ background:#fff; border-left:1px solid var(--line); display:flex; flex-direction:column }
+  @media (max-width:820px){ .cuenta{ border-left:none; border-top:1px solid var(--line); position:sticky; bottom:0 } }
+  .cuenta h2{ margin:0; padding:12px 14px; font-size:16px; border-bottom:1px solid var(--line) }
+  .items{ flex:1; overflow-y:auto; padding:6px 10px; min-height:120px }
+  .li{ display:flex; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid var(--line) }
+  .li .n{ flex:1; font-size:14px }
+  .qbtn{ width:32px; height:32px; border-radius:9px; border:1px solid var(--line); background:#fff; font-size:18px; font-weight:700; color:var(--green) }
+  .foot{ border-top:1px solid var(--line); padding:12px 14px }
+  .tot{ display:flex; justify-content:space-between; font-size:22px; font-weight:800; color:var(--green); margin-bottom:10px }
+  /* Modal */
+  .bg{ position:fixed; inset:0; background:rgba(14,58,57,.55); display:flex; align-items:flex-end; justify-content:center; z-index:50 }
+  @media (min-width:600px){ .bg{ align-items:center } }
+  .modal{ background:#fff; width:min(460px,100%); border-radius:20px 20px 0 0; padding:20px }
+  @media (min-width:600px){ .modal{ border-radius:20px } }
+  .metodos{ display:flex; gap:8px; margin:12px 0 }
+  .metodos button{ flex:1; padding:14px; border-radius:12px; border:2px solid var(--line); background:#fff; font-weight:700; color:var(--green) }
+  .metodos button.act{ border-color:var(--teal); background:rgba(46,196,182,.1) }
+  .vacio{ color:var(--muted); text-align:center; padding:24px; font-size:14px }
+</style>
+</head>
+<body>
+  <div id="app"><div class="login"><div class="card"><div class="marca"><span class="tri">▲</span> Platify POS</div><p>Cargando…</p></div></div></div>
+  <script type="module" src="pos-app.js"></script>
+</body>
+</html>

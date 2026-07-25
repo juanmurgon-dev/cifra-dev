@@ -1,0 +1,15 @@
+{
+  "name": "Platify POS",
+  "short_name": "POS",
+  "description": "Punto de venta de Platify para la caja del restaurante.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e3a39",
+  "theme_color": "#0e3a39",
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

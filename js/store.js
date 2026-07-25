@@ -27,6 +27,8 @@ export const state = {
   costosPlatillo: [],   // costo directo por platillo (para el margen)
   recetas: [],          // recetas: platillo/preparación → insumos + cantidad
   recetasFicha: [],     // ficha técnica: categoría, tiempo de prep, procedimiento
+  posTurno: null,       // turno de caja abierto (POS)
+  posVentas: [],        // ventas del turno/día (POS)
   perfil: { nombre: "", email: "", cargado: false },
   config: { presupuestoSemanal: 35000, presupuestoPorArea: {} },
   orgId: null,          // id del restaurante (multi-tenant); null = single-tenant
@@ -355,6 +357,40 @@ export async function importarRecetas(grupos) {
   return ordenados.length;
 }
 
+// ─── POS (Fase 1: barra) ───────────────────────────────
+async function cargarPosTurno() {
+  const { data, error } = await supabase.from("pos_turnos").select("*").eq("estado", "abierto").order("abierto_en", { ascending: false }).limit(1);
+  if (!error) { state.posTurno = (data && data[0]) || null; notify(); }
+}
+async function cargarPosVentas() {
+  let q = supabase.from("pos_ventas").select("*").order("fecha", { ascending: false });
+  if (state.posTurno) { q = q.eq("turno_id", state.posTurno.id); }
+  else { const d = new Date(); d.setHours(0, 0, 0, 0); q = q.gte("fecha", d.toISOString()); }
+  const { data, error } = await q;
+  if (!error && data) { state.posVentas = data; notify(); }
+}
+export async function abrirTurno(fondo) {
+  const { data, error } = await supabase.from("pos_turnos").insert({ fondo_inicial: num(fondo) || 0, cajero: miNombre(), estado: "abierto" }).select().single();
+  if (error) throw error;
+  state.posTurno = data; await cargarPosVentas(); notify(); return data;
+}
+export async function cerrarTurno(efectivoContado, nota) {
+  if (!state.posTurno) return;
+  const { error } = await supabase.from("pos_turnos").update({ cerrado_en: new Date().toISOString(), estado: "cerrado", efectivo_contado: num(efectivoContado) || 0, nota: nota || "" }).eq("id", state.posTurno.id);
+  if (error) throw error;
+  state.posTurno = null; state.posVentas = []; notify();
+}
+export async function guardarVenta(v) {
+  const row = {
+    items: v.items || [], total: num(v.total), metodo: v.metodo || "efectivo",
+    recibido: num(v.recibido), cambio: num(v.cambio), cajero: miNombre(),
+    turno_id: state.posTurno ? state.posTurno.id : null, nota: v.nota || "",
+  };
+  const { data, error } = await supabase.from("pos_ventas").insert(row).select().single();
+  if (error) throw error;
+  await cargarPosVentas(); return data;
+}
+
 async function cargarRequisiciones() {
   // La tabla puede no existir aún (si no corren requisiciones.sql).
   const { data, error } = await supabase.from("requisiciones").select("*").order("creado_en", { ascending: false });
@@ -466,6 +502,7 @@ export async function init() {
   await cargarMiOrg();  // primero: define single vs multi-tenant y el orgId
   await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas(), cargarRecetasFicha()]);
   try { await recalcularTodos(); } catch (e) { /* recetas o precios aún no disponibles */ }
+  try { await cargarPosTurno(); await cargarPosVentas(); } catch (e) { /* POS aún no configurado */ }
   state.listo = true;
   notify();
   // Fija la base de la meta UNA sola vez, para que las semanas viejas queden
