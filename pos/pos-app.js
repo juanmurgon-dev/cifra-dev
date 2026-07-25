@@ -14,6 +14,7 @@ let ordenActual = null;  // { id?, mesa, tipo, personas, items:[{producto,cantid
 let catActiva = "Todos";
 let montado = false;
 let persistTimer = null;
+let arrastrando = false;  // true mientras se arrastra una mesa (no re-renderizar)
 
 // ── Sesión ──
 supabase.auth.getSession().then(({ data }) => sesion(data.session));
@@ -61,10 +62,19 @@ const categorias = () => { const s = new Set(); for (const p of menu()) s.add(p.
 const itemsTotal = (items) => (items || []).reduce((a, l) => a + l.cantidad * l.precio, 0);
 
 function render() {
-  if (!montado) return;
+  if (!montado || arrastrando) return;
   if (vista === "orden" && ordenActual) return renderOrden();
   if (vista === "config") return renderConfig();
   return renderMesas();
+}
+
+// Una mesa en el plano (vista de arriba). occ = orden abierta o null.
+function fmesaHTML(m, occ, extra = "") {
+  const x = m.x == null ? 50 : num(m.x), y = m.y == null ? 50 : num(m.y);
+  return `<div class="fmesa ${occ ? "occ" : ""} ${extra}" data-id="${m.id}" data-mesa="${esc(m.nombre)}" style="left:${x}%;top:${y}%">
+    <b>${esc(m.nombre)}</b>
+    ${occ ? `<span class="mt">${money(occ.total)}</span><span class="mp">${occ.personas || "-"}p · ${(occ.items || []).length} art</span>` : `<span class="ml">Libre</span>`}
+  </div>`;
 }
 
 // ════════ PANTALLA PRINCIPAL: MAPA DE MESAS ════════
@@ -77,17 +87,6 @@ function renderMesas() {
   const totalAbierto = ordenes.reduce((a, o) => a + num(o.total), 0);
   const ventasTurno = (store.state.posVentas || []).reduce((a, v) => a + num(v.total), 0);
 
-  const zonas = {};
-  for (const m of mesas) { const z = (m.zona || "Salón").trim() || "Salón"; (zonas[z] = zonas[z] || []).push(m); }
-
-  const mesaCard = (m) => {
-    const o = store.ordenDeMesa(m.nombre);
-    return `<button class="mesa ${o ? "occ" : ""}" data-mesa="${esc(m.nombre)}">
-      <b>${esc(m.nombre)}</b>
-      ${o ? `<span class="mt">${money(o.total)}</span><span class="mp">${o.personas || "-"}p · ${(o.items || []).length} art</span>` : `<span class="ml">Libre</span>`}
-    </button>`;
-  };
-
   app.innerHTML = `
     <header class="top">
       <span class="marca"><span class="tri" style="color:var(--orange)">▲</span> Platify <small style="font-weight:400;opacity:.8">POS</small></span>
@@ -99,15 +98,16 @@ function renderMesas() {
         <div class="rcard"><div class="n">${money(totalAbierto)}</div><div class="l">Cuentas abiertas</div></div>
         <div class="rcard"><div class="n">${money(ventasTurno)}</div><div class="l">${t ? "Ventas del turno" : "Ventas de hoy"}</div></div>
       </div>
-      ${!mesas.length ? `<div class="vacio">Aún no tienes mesas. Toca <b>⚙️ Configurar mesas</b> para poner tu layout.</div>`
-        : Object.entries(zonas).map(([z, ms]) => `<div class="zona"><div class="zt">${esc(z)}</div><div class="mesas">${ms.map(mesaCard).join("")}</div></div>`).join("")}
-      <div class="zona"><div class="zt">Para llevar / mostrador</div>
+      ${!mesas.length
+        ? `<div class="vacio">Aún no tienes mesas. Toca <b>⚙️ Acomodar mesas</b> para dibujar tu layout.</div>`
+        : `<div class="floor" id="floor">${mesas.map((m) => fmesaHTML(m, store.ordenDeMesa(m.nombre))).join("")}</div>`}
+      <div class="zona" style="margin-top:14px"><div class="zt">Para llevar / mostrador</div>
         <div class="mesas">
           ${llevar.map((o) => `<button class="mesa llev" data-llevar="${o.id}"><b>🥡</b><span class="mt">${money(o.total)}</span><span class="mp">${(o.items || []).length} art</span></button>`).join("")}
           <button class="mesa nueva" id="nuevallevar">🥡<br>Nueva</button>
         </div>
       </div>
-      <button class="btn sec" id="config" style="width:100%;margin-top:6px">⚙️ Configurar mesas</button>
+      <button class="btn sec" id="config" style="width:100%;margin-top:6px">⚙️ Acomodar mesas</button>
     </div>`;
 
   app.querySelector("#turno").addEventListener("click", t ? modalCorte : modalTurno);
@@ -117,7 +117,7 @@ function renderMesas() {
     const o = (store.state.posOrdenes || []).find((x) => x.id === b.dataset.llevar);
     if (o) { ordenActual = { ...o, items: (o.items || []).map((x) => ({ ...x })) }; catActiva = "Todos"; vista = "orden"; render(); }
   }));
-  app.querySelectorAll("[data-mesa]").forEach((b) => b.addEventListener("click", () => abrirMesa(b.dataset.mesa)));
+  app.querySelectorAll(".fmesa").forEach((b) => b.addEventListener("click", () => abrirMesa(b.dataset.mesa)));
 }
 
 function abrirMesa(nombre) {
@@ -218,13 +218,16 @@ function renderOrden() {
   });
 }
 
-// ════════ CONFIGURAR MESAS ════════
+// ════════ ACOMODAR MESAS (plano arrastrable, vista de arriba) ════════
 function renderConfig() {
   const mesas = store.state.posMesas || [];
   app.innerHTML = `
-    <header class="top"><button class="btn sec" id="volver" style="padding:7px 12px;font-size:14px">‹ Mesas</button><span style="font-weight:800">Configurar mesas</span><span style="width:60px"></span></header>
-    <div style="padding:14px;max-width:640px;margin:0 auto">
-      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px">
+    <header class="top"><button class="btn sec" id="volver" style="padding:7px 12px;font-size:14px">‹ Mesas</button><span style="font-weight:800">Acomodar mesas</span><span style="width:60px"></span></header>
+    <div style="padding:12px">
+      <p style="color:var(--muted);font-size:13px;margin:0 0 8px">Arrastra cada mesa a su lugar en el salón. Toca una mesa para renombrar o quitar.</p>
+      ${!mesas.length ? `<div class="vacio">Agrega tu primera mesa abajo 👇</div>`
+        : `<div class="floor" id="floor">${mesas.map((m) => fmesaHTML(m, null, "edit")).join("")}</div>`}
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px;max-width:640px">
         <div style="font-weight:800;color:var(--green);margin-bottom:8px">Agregar mesa</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input id="mn" placeholder="Nombre/número (ej. 5, Terraza 2)" style="flex:2;min-width:140px;padding:12px;border-radius:10px;border:1px solid var(--line)" />
@@ -236,12 +239,6 @@ function renderConfig() {
           <button class="btn sec" id="addrango">＋ Crear 1…N de golpe</button>
         </div>
       </div>
-      <div style="font-weight:800;color:var(--green);margin:0 2px 8px">Mis mesas (${mesas.length})</div>
-      <div id="lista">${mesas.length ? mesas.map((m) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px">
-          <span><b style="color:var(--green)">${esc(m.nombre)}</b>${m.zona ? ` <span style="color:var(--muted);font-size:13px">· ${esc(m.zona)}</span>` : ""}</span>
-          <button data-del="${m.id}" style="background:none;border:none;color:var(--rojo);font-size:16px;cursor:pointer">✕ Quitar</button>
-        </div>`).join("") : `<div class="vacio">Aún no hay mesas.</div>`}</div>
     </div>`;
 
   app.querySelector("#volver").addEventListener("click", () => { vista = "mesas"; render(); });
@@ -250,13 +247,77 @@ function renderConfig() {
     try { await store.guardarMesa(nombre, app.querySelector("#mz").value.trim()); render(); } catch (e) { alert("Error: " + ((e && e.message) || e)); }
   };
   app.querySelector("#add").addEventListener("click", addUna);
+  app.querySelector("#mn").addEventListener("keydown", (e) => { if (e.key === "Enter") addUna(); });
   app.querySelector("#addrango").addEventListener("click", async () => {
     const n = Math.min(60, Math.max(0, parseInt(app.querySelector("#rango").value, 10) || 0));
     if (!n) return; const zona = app.querySelector("#mz").value.trim();
     const btn = app.querySelector("#addrango"); btn.disabled = true; btn.textContent = "Creando…";
     try { for (let i = 1; i <= n; i++) await store.guardarMesa(String(i), zona); render(); } catch (e) { alert("Error: " + ((e && e.message) || e)); }
   });
-  app.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => { if (confirm("¿Quitar esta mesa?")) { await store.borrarMesa(b.dataset.del); render(); } }));
+
+  // Arrastrar mesas en el plano
+  const floor = app.querySelector("#floor");
+  if (floor) floor.querySelectorAll(".fmesa").forEach((el) => activarArrastre(el, floor));
+}
+
+// Arrastre con pointer events. Distingue toque (editar) de arrastre (mover).
+function activarArrastre(el, floor) {
+  let sx = 0, sy = 0, movido = false, id = el.dataset.id;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const onDown = (e) => {
+    e.preventDefault();
+    sx = e.clientX; sy = e.clientY; movido = false; arrastrando = true;
+    el.setPointerCapture(e.pointerId);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+  };
+  const onMove = (e) => {
+    if (Math.abs(e.clientX - sx) > 4 || Math.abs(e.clientY - sy) > 4) movido = true;
+    const r = floor.getBoundingClientRect();
+    const x = clamp(((e.clientX - r.left) / r.width) * 100, 5, 95);
+    const y = clamp(((e.clientY - r.top) / r.height) * 100, 7, 93);
+    el.style.left = x + "%"; el.style.top = y + "%";
+    el.dataset.x = x; el.dataset.y = y;
+  };
+  const onUp = async (e) => {
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("pointerup", onUp);
+    el.removeEventListener("pointercancel", onUp);
+    try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+    arrastrando = false;
+    if (movido) {
+      try { await store.moverMesa(id, num(el.dataset.x), num(el.dataset.y)); } catch (err) { alert("Error al guardar posición: " + ((err && err.message) || err)); }
+    } else {
+      modalEditarMesa(id);
+    }
+  };
+  el.addEventListener("pointerdown", onDown);
+}
+
+function modalEditarMesa(id) {
+  const m = (store.state.posMesas || []).find((x) => x.id === id); if (!m) return;
+  const bg = modal(`
+    <h2 style="margin:0 0 12px;color:var(--green)">Mesa ${esc(m.nombre)}</h2>
+    <label style="font-size:13px;color:var(--muted)">Nombre/número</label>
+    <input id="en" value="${esc(m.nombre)}" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);margin:4px 0 10px" />
+    <label style="font-size:13px;color:var(--muted)">Zona (opcional)</label>
+    <input id="ez" value="${esc(m.zona || "")}" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);margin:4px 0 14px" />
+    <button class="btn" id="ok" style="width:100%">Guardar</button>
+    <button class="btn sec" id="del" style="width:100%;margin-top:8px;color:var(--rojo)">✕ Quitar mesa</button>
+    <button class="btn sec" id="cancel" style="width:100%;margin-top:8px">Cancelar</button>
+    <div class="err" id="msg" style="text-align:center;color:var(--rojo)"></div>`);
+  bg.querySelector("#cancel").addEventListener("click", () => bg.remove());
+  bg.querySelector("#ok").addEventListener("click", async () => {
+    const nombre = bg.querySelector("#en").value.trim(); if (!nombre) return;
+    const b = bg.querySelector("#ok"); b.disabled = true; b.textContent = "…";
+    try { await store.actualizarMesa(id, { nombre, zona: bg.querySelector("#ez").value.trim() }); bg.remove(); render(); }
+    catch (e) { b.disabled = false; b.textContent = "Guardar"; bg.querySelector("#msg").textContent = "Error: " + ((e && e.message) || e); }
+  });
+  bg.querySelector("#del").addEventListener("click", async () => {
+    if (!confirm("¿Quitar esta mesa?")) return;
+    try { await store.borrarMesa(id); bg.remove(); render(); } catch (e) { bg.querySelector("#msg").textContent = "Error: " + ((e && e.message) || e); }
+  });
 }
 
 // ════════ MODALES ════════

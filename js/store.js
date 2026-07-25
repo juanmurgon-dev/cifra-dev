@@ -399,9 +399,25 @@ async function cargarMesas() {
   const { data, error } = await supabase.from("pos_mesas").select("*").eq("activa", true).order("orden").order("nombre");
   if (!error && data) { state.posMesas = data; notify(); }
 }
-export async function guardarMesa(nombre, zona) {
+export async function guardarMesa(nombre, zona, x, y) {
+  const n = state.posMesas.length;
   const maxO = state.posMesas.reduce((a, m) => Math.max(a, num(m.orden)), 0);
-  const { error } = await supabase.from("pos_mesas").insert({ nombre: String(nombre || "").slice(0, 40), zona: String(zona || "").slice(0, 40), orden: maxO + 1 });
+  const px = x != null ? x : 12 + (n % 6) * 15;                 // acomodo inicial en cuadrícula
+  const py = y != null ? y : 14 + Math.floor(n / 6) * 20;
+  const { error } = await supabase.from("pos_mesas").insert({ nombre: String(nombre || "").slice(0, 40), zona: String(zona || "").slice(0, 40), orden: maxO + 1, x: px, y: py });
+  if (error) throw error; await cargarMesas();
+}
+export async function moverMesa(id, x, y) {
+  const nx = Math.round(x * 10) / 10, ny = Math.round(y * 10) / 10;
+  const m = state.posMesas.find((mm) => mm.id === id); if (m) { m.x = nx; m.y = ny; }   // local (sin recargar, para no cortar el arrastre)
+  const { error } = await supabase.from("pos_mesas").update({ x: nx, y: ny }).eq("id", id);
+  if (error) throw error;
+}
+export async function actualizarMesa(id, patch) {
+  const p = {};
+  if (patch.nombre != null) p.nombre = String(patch.nombre).slice(0, 40);
+  if (patch.zona != null) p.zona = String(patch.zona).slice(0, 40);
+  const { error } = await supabase.from("pos_mesas").update(p).eq("id", id);
   if (error) throw error; await cargarMesas();
 }
 export async function borrarMesa(id) {
