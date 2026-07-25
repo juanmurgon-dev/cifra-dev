@@ -383,8 +383,9 @@ export async function cerrarTurno(efectivoContado, nota) {
 export async function guardarVenta(v) {
   const row = {
     items: v.items || [], total: num(v.total), metodo: v.metodo || "efectivo",
-    recibido: num(v.recibido), cambio: num(v.cambio), cajero: miNombre(),
-    turno_id: state.posTurno ? state.posTurno.id : null, nota: v.nota || "",
+    recibido: num(v.recibido), cambio: num(v.cambio),
+    tipo: v.tipo || "llevar", mesa: String(v.mesa || ""), personas: num(v.personas) || 0,
+    cajero: miNombre(), turno_id: state.posTurno ? state.posTurno.id : null, nota: v.nota || "",
   };
   const { data, error } = await supabase.from("pos_ventas").insert(row).select().single();
   if (error) throw error;

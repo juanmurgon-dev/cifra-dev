@@ -9,6 +9,8 @@ const num = (x) => { const n = parseFloat(x); return isNaN(n) ? 0 : n; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let orden = [];          // [{producto, precio, cantidad}]
+let tipo = null;         // 'llevar' | 'comedor' (se elige al abrir la orden)
+let mesa = "", personas = 0;
 let catActiva = "Todos";
 let montado = false;
 
@@ -92,7 +94,10 @@ function render() {
               <button class="prod" data-p="${esc(p.producto)}"><b>${esc(p.producto)}</b><span class="p">${money(p.precio)}</span></button>`).join("")}</div>`}
       </div>
       <div class="cuenta">
-        <h2>Cuenta ${nItems() ? `· ${nItems()}` : ""}</h2>
+        <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span>${tipo === "comedor" ? `🍽️ Mesa ${esc(mesa)} · ${personas}p` : tipo === "llevar" ? "🥡 Para llevar" : "Cuenta"}${nItems() ? ` · ${nItems()}` : ""}</span>
+          <button id="nuevaorden" style="background:none;border:none;color:var(--teal);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${tipo ? "Cambiar" : ""}</button>
+        </h2>
         <div class="items">${orden.length ? orden.map((l) => `
           <div class="li">
             <span class="n">${esc(l.producto)}<br><span style="color:var(--muted);font-size:12px">${money(l.precio)} c/u</span></span>
@@ -115,6 +120,51 @@ function render() {
   app.querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => cambiar(b.dataset.m, -1)));
   const cb = app.querySelector("#cobrar"); if (cb) cb.addEventListener("click", modalCobro);
   app.querySelector("#turno").addEventListener("click", t ? modalCorte : modalTurno);
+  const no = app.querySelector("#nuevaorden"); if (no) no.addEventListener("click", modalNuevaOrden);
+
+  // Al abrir/empezar una orden hay que elegir tipo (para llevar / comedor + mesa).
+  if (!tipo && !document.getElementById("nueva-orden")) modalNuevaOrden();
+}
+
+// ── Nueva orden: para llevar o comedor (mesa + personas) ──
+function modalNuevaOrden() {
+  let paso = "tipo", mMesa = mesa || "", mPers = personas || 2;
+  const bg = document.createElement("div"); bg.className = "bg"; bg.id = "nueva-orden";
+  function dib() {
+    if (paso === "tipo") {
+      bg.innerHTML = `<div class="modal">
+        <h2 style="margin:0 0 4px;color:var(--green)">Nueva orden</h2>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 14px">¿Cómo es el pedido?</p>
+        <div style="display:flex;gap:10px">
+          <button class="btn sec" id="llevar" style="flex:1;padding:24px 12px;font-size:16px;line-height:1.4">🥡<br>Para llevar</button>
+          <button class="btn" id="comedor" style="flex:1;padding:24px 12px;font-size:16px;line-height:1.4">🍽️<br>Comedor</button>
+        </div></div>`;
+      bg.querySelector("#llevar").addEventListener("click", () => { tipo = "llevar"; mesa = ""; personas = 0; bg.remove(); render(); });
+      bg.querySelector("#comedor").addEventListener("click", () => { paso = "mesa"; dib(); });
+    } else {
+      bg.innerHTML = `<div class="modal">
+        <h2 style="margin:0 0 8px;color:var(--green)">Comedor · elige mesa</h2>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
+          ${Array.from({ length: 20 }, (_, i) => i + 1).map((n) => `<button class="mesabtn" data-n="${n}" style="padding:14px 0;border-radius:12px;border:2px solid ${mMesa == String(n) ? "var(--teal)" : "var(--line)"};background:${mMesa == String(n) ? "rgba(46,196,182,.12)" : "#fff"};font-weight:800;font-size:16px;color:var(--green)">${n}</button>`).join("")}
+        </div>
+        <label style="font-size:13px;color:var(--muted)">Personas en la mesa</label>
+        <div style="display:flex;align-items:center;gap:16px;justify-content:center;margin:6px 0 16px">
+          <button class="qbtn" id="pm" style="width:40px;height:40px;font-size:22px">−</button>
+          <b style="font-size:24px;min-width:36px;text-align:center">${mPers}</b>
+          <button class="qbtn" id="pp" style="width:40px;height:40px;font-size:22px">+</button>
+        </div>
+        <button class="btn" id="ok" style="width:100%" ${mMesa ? "" : "disabled"}>Continuar</button>
+        <button class="btn sec" id="atras" style="width:100%;margin-top:8px">← Atrás</button>
+      </div>`;
+      bg.querySelectorAll(".mesabtn").forEach((b) => b.addEventListener("click", () => { mMesa = b.dataset.n; dib(); }));
+      bg.querySelector("#pm").addEventListener("click", () => { mPers = Math.max(1, mPers - 1); dib(); });
+      bg.querySelector("#pp").addEventListener("click", () => { mPers++; dib(); });
+      bg.querySelector("#atras").addEventListener("click", () => { paso = "tipo"; dib(); });
+      bg.querySelector("#ok").addEventListener("click", () => { if (!mMesa) return; tipo = "comedor"; mesa = mMesa; personas = mPers; bg.remove(); render(); });
+    }
+  }
+  dib(); document.body.appendChild(bg);
+  bg.addEventListener("click", (e) => { if (e.target === bg && tipo) bg.remove(); }); // solo se puede cerrar si ya hay tipo
 }
 
 // ── Cobro ──
@@ -148,12 +198,13 @@ function modalCobro() {
         await store.guardarVenta({
           items: orden.map((l) => ({ producto: l.producto, cantidad: l.cantidad, precio: l.precio, importe: l.cantidad * l.precio })),
           total: total(), metodo, recibido: metodo === "efectivo" ? num(recibido) : total(), cambio: metodo === "efectivo" ? Math.max(0, num(recibido) - total()) : 0,
+          tipo: tipo || "llevar", mesa, personas,
         });
-        orden = []; bg.remove(); render();
+        orden = []; tipo = null; mesa = ""; personas = 0; bg.remove(); render();
       } catch (e) { b.disabled = false; b.textContent = "✅ Confirmar cobro"; bg.querySelector("#msg").textContent = "Error: " + ((e && e.message) || e); }
     });
   }
-  dib(); app.appendChild(bg); bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  dib(); document.body.appendChild(bg); bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
 }
 
 // ── Turno ──
@@ -167,7 +218,7 @@ function modalTurno() {
       <button class="btn" id="ok" style="width:100%">Abrir turno</button>
       <button class="btn sec" id="cancel" style="width:100%;margin-top:8px">Cancelar</button>
     </div>`;
-  app.appendChild(bg);
+  document.body.appendChild(bg);
   bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
   bg.querySelector("#cancel").addEventListener("click", () => bg.remove());
   bg.querySelector("#ok").addEventListener("click", async () => {
@@ -204,7 +255,7 @@ function modalCorte() {
       <button class="btn sec" id="cancel" style="width:100%;margin-top:8px">Seguir vendiendo</button>
       <div class="err" id="msg" style="text-align:center;color:var(--rojo)"></div>
     </div>`;
-  app.appendChild(bg);
+  document.body.appendChild(bg);
   bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
   bg.querySelector("#cancel").addEventListener("click", () => bg.remove());
   const cont = bg.querySelector("#contado");
