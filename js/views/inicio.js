@@ -161,7 +161,8 @@ function grid2(tiles) {
   return `<div style="display:grid;grid-template-columns:${cols};gap:10px">${tiles.join("")}</div>`;
 }
 
-// "De un vistazo": lo que sube/baja de venta y tu insumo clave.
+// "De un vistazo": pulso DIARIO (venta de ayer) + lo que sube/baja de venta en
+// la semana y tu insumo clave.
 function cardVistazo(tp, ins, cd, pulso) {
   const tiles = [];
   // ── Pulso diario: venta del último día con corte (lo único que sí es diario) ──
@@ -250,7 +251,7 @@ function renderOwner(el) {
       proy = { dias: diasT, venta: venta * fV, gasto: gasto * fG };
     }
 
-    // Meta (la meta es de compras variables, sin operativo)
+    // Meta
     const pct = meta > 0 ? Math.min(100, 100 * gastoVar / meta) : 0;
     const cMeta = pct >= 100 ? "var(--rojo)" : pct >= 85 ? "var(--amarillo)" : "var(--verde)";
 

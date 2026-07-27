@@ -7,7 +7,7 @@ import { supabase } from "./supabase-init.js";
 // ── Catálogos (mismos que el bot) ───────────────────────────
 export const AREAS = ["cocina", "barra", "piso", "limpieza", "otro"];
 export const TIPOS = ["costo de venta", "operativo"];
-export const UNIDADES = ["kg", "pz", "L", "caja", "paq", "manojo", "lt", "gr", "otro"];
+export const UNIDADES = ["kg", "pz", "L", "caja", "paq", "manojo", "lt", "gal", "gr", "otro"];
 
 export const COLOR_AREA = {
   cocina: "#2ec4b6", barra: "#ff9f1c", piso: "#ffbf69",
@@ -27,10 +27,6 @@ export const state = {
   costosPlatillo: [],   // costo directo por platillo (para el margen)
   recetas: [],          // recetas: platillo/preparación → insumos + cantidad
   recetasFicha: [],     // ficha técnica: categoría, tiempo de prep, procedimiento
-  posTurno: null,       // turno de caja abierto (POS)
-  posVentas: [],        // ventas del turno/día (POS)
-  posMesas: [],         // mesas del restaurante (layout)
-  posOrdenes: [],       // órdenes abiertas por mesa
   perfil: { nombre: "", email: "", cargado: false },
   config: { presupuestoSemanal: 35000, presupuestoPorArea: {} },
   orgId: null,          // id del restaurante (multi-tenant); null = single-tenant
@@ -188,6 +184,7 @@ const _uBase = {
   g: ["g", 1], gr: ["g", 1], grs: ["g", 1], gramo: ["g", 1], gramos: ["g", 1],
   kg: ["g", 1000], kgs: ["g", 1000], kilo: ["g", 1000], kilos: ["g", 1000], mg: ["g", 0.001],
   ml: ["ml", 1], cc: ["ml", 1], l: ["ml", 1000], lt: ["ml", 1000], lts: ["ml", 1000], litro: ["ml", 1000], litros: ["ml", 1000],
+  gal: ["ml", 3785], galon: ["ml", 3785], "galón": ["ml", 3785], galones: ["ml", 3785],
   oz: ["ml", 29.57], onza: ["ml", 29.57], onzas: ["ml", 29.57], cda: ["ml", 15], cucharada: ["ml", 15], cucharadas: ["ml", 15], cdta: ["ml", 5], cucharadita: ["ml", 5],
   pza: ["pza", 1], pz: ["pza", 1], pzas: ["pza", 1], pieza: ["pza", 1], piezas: ["pza", 1], u: ["pza", 1], un: ["pza", 1], unidad: ["pza", 1],
 };
@@ -198,7 +195,7 @@ export function factorConversion(desde, hacia) {
   if (!a || !b || a[0] !== b[0]) return 1;
   return a[1] / b[1];
 }
-// ¿Se puede convertir entre estas dos unidades? (misma familia: volumen/peso/pza)
+// ¿Se puede convertir entre estas dos unidades?
 export function unidadesCompatibles(u1, u2) {
   const a = _uBase[normU(u1)], b = _uBase[normU(u2)];
   return !!(a && b && a[0] === b[0]);
@@ -330,7 +327,7 @@ export async function recalcularTodos() {
   const platillos = [...new Set((state.recetas || []).filter((r) => !r.es_preparacion).map((r) => r.producto))];
   let cambios = 0;
   for (const p of platillos) {
-    const nuevo = round2(costoDeReceta(p) / (porcionesDe(p) || 1)); // costo POR PORCIÓN (así cuadra con el precio de venta por porción)
+    const nuevo = round2(costoDeReceta(p) / (porcionesDe(p) || 1)); // costo POR PORCIÓN
     if (round2(actuales.get(p)) !== nuevo) {
       await supabase.from("costos_platillo").upsert({ producto: p, costo: nuevo, actualizado: new Date().toISOString() });
       cambios++;
@@ -357,104 +354,6 @@ export async function importarRecetas(grupos) {
   await cargarRecetas();
   await recalcularTodos();
   return ordenados.length;
-}
-
-// ─── POS (Fase 1: barra) ───────────────────────────────
-async function cargarPosTurno() {
-  const { data, error } = await supabase.from("pos_turnos").select("*").eq("estado", "abierto").order("abierto_en", { ascending: false }).limit(1);
-  if (!error) { state.posTurno = (data && data[0]) || null; notify(); }
-}
-async function cargarPosVentas() {
-  let q = supabase.from("pos_ventas").select("*").order("fecha", { ascending: false });
-  if (state.posTurno) { q = q.eq("turno_id", state.posTurno.id); }
-  else { const d = new Date(); d.setHours(0, 0, 0, 0); q = q.gte("fecha", d.toISOString()); }
-  const { data, error } = await q;
-  if (!error && data) { state.posVentas = data; notify(); }
-}
-export async function abrirTurno(fondo) {
-  const { data, error } = await supabase.from("pos_turnos").insert({ fondo_inicial: num(fondo) || 0, cajero: miNombre(), estado: "abierto" }).select().single();
-  if (error) throw error;
-  state.posTurno = data; await cargarPosVentas(); notify(); return data;
-}
-export async function cerrarTurno(efectivoContado, nota) {
-  if (!state.posTurno) return;
-  const { error } = await supabase.from("pos_turnos").update({ cerrado_en: new Date().toISOString(), estado: "cerrado", efectivo_contado: num(efectivoContado) || 0, nota: nota || "" }).eq("id", state.posTurno.id);
-  if (error) throw error;
-  state.posTurno = null; state.posVentas = []; notify();
-}
-export async function guardarVenta(v) {
-  const row = {
-    items: v.items || [], total: num(v.total), metodo: v.metodo || "efectivo",
-    recibido: num(v.recibido), cambio: num(v.cambio),
-    tipo: v.tipo || "llevar", mesa: String(v.mesa || ""), personas: num(v.personas) || 0,
-    cajero: miNombre(), turno_id: state.posTurno ? state.posTurno.id : null, nota: v.nota || "",
-  };
-  const { data, error } = await supabase.from("pos_ventas").insert(row).select().single();
-  if (error) throw error;
-  await cargarPosVentas(); return data;
-}
-
-// ── Mesas (layout) ──
-async function cargarMesas() {
-  const { data, error } = await supabase.from("pos_mesas").select("*").eq("activa", true).order("orden").order("nombre");
-  if (!error && data) { state.posMesas = data; notify(); }
-}
-export async function guardarMesa(nombre, zona, x, y) {
-  const n = state.posMesas.length;
-  const maxO = state.posMesas.reduce((a, m) => Math.max(a, num(m.orden)), 0);
-  const px = x != null ? x : 12 + (n % 6) * 15;                 // acomodo inicial en cuadrícula
-  const py = y != null ? y : 14 + Math.floor(n / 6) * 20;
-  const { error } = await supabase.from("pos_mesas").insert({ nombre: String(nombre || "").slice(0, 40), zona: String(zona || "").slice(0, 40), orden: maxO + 1, x: px, y: py });
-  if (error) throw error; await cargarMesas();
-}
-export async function moverMesa(id, x, y) {
-  const nx = Math.round(x * 10) / 10, ny = Math.round(y * 10) / 10;
-  const m = state.posMesas.find((mm) => mm.id === id); if (m) { m.x = nx; m.y = ny; }   // local (sin recargar, para no cortar el arrastre)
-  const { error } = await supabase.from("pos_mesas").update({ x: nx, y: ny }).eq("id", id);
-  if (error) throw error;
-}
-export async function actualizarMesa(id, patch) {
-  const p = {};
-  if (patch.nombre != null) p.nombre = String(patch.nombre).slice(0, 40);
-  if (patch.zona != null) p.zona = String(patch.zona).slice(0, 40);
-  const { error } = await supabase.from("pos_mesas").update(p).eq("id", id);
-  if (error) throw error; await cargarMesas();
-}
-export async function borrarMesa(id) {
-  const { error } = await supabase.from("pos_mesas").update({ activa: false }).eq("id", id);
-  if (error) throw error; await cargarMesas();
-}
-
-// ── Órdenes abiertas (cuenta por mesa) ──
-async function cargarOrdenes() {
-  const { data, error } = await supabase.from("pos_ordenes").select("*").eq("estado", "abierta").order("abierta_en");
-  if (!error && data) { state.posOrdenes = data; notify(); }
-}
-export function ordenDeMesa(mesa) {
-  return (state.posOrdenes || []).find((o) => o.estado === "abierta" && o.tipo === "comedor" && o.mesa === mesa) || null;
-}
-export async function guardarOrden(o) {
-  const row = {
-    mesa: String(o.mesa || ""), tipo: o.tipo || "comedor", personas: num(o.personas) || 0,
-    items: o.items || [], total: num(o.total), estado: "abierta",
-    turno_id: state.posTurno ? state.posTurno.id : null, cajero: miNombre(), actualizada_en: new Date().toISOString(),
-  };
-  if (o.id) {
-    const { error } = await supabase.from("pos_ordenes").update(row).eq("id", o.id);
-    if (error) throw error; await cargarOrdenes(); return o.id;
-  }
-  const { data, error } = await supabase.from("pos_ordenes").insert(row).select().single();
-  if (error) throw error; await cargarOrdenes(); return data.id;
-}
-export async function borrarOrden(id) {
-  if (!id) return;
-  await supabase.from("pos_ordenes").delete().eq("id", id);
-  await cargarOrdenes();
-}
-export async function cobrarOrden(o, pago) {
-  await guardarVenta({ items: o.items, total: o.total, metodo: pago.metodo, recibido: pago.recibido, cambio: pago.cambio, tipo: o.tipo, mesa: o.mesa, personas: o.personas });
-  if (o.id) await supabase.from("pos_ordenes").update({ estado: "cobrada", actualizada_en: new Date().toISOString() }).eq("id", o.id);
-  await cargarOrdenes();
 }
 
 async function cargarRequisiciones() {
@@ -568,7 +467,6 @@ export async function init() {
   await cargarMiOrg();  // primero: define single vs multi-tenant y el orgId
   await Promise.allSettled([cargarTickets(), cargarConfig(), cargarCortes(), cargarProductos(), cargarPerfil(), cargarGastosFijos(), cargarRequisiciones(), cargarCostosPlatillo(), cargarRecetas(), cargarRecetasFicha()]);
   try { await recalcularTodos(); } catch (e) { /* recetas o precios aún no disponibles */ }
-  try { await cargarPosTurno(); await cargarPosVentas(); await cargarMesas(); await cargarOrdenes(); } catch (e) { /* POS aún no configurado */ }
   state.listo = true;
   notify();
   // Fija la base de la meta UNA sola vez, para que las semanas viejas queden
@@ -598,6 +496,7 @@ export async function guardarTicket(t) {
   });
   if (error) throw error;
   await cargarTickets();
+  return proveedor;
 }
 
 export async function actualizarTicket(id, datos) {
@@ -774,6 +673,7 @@ export function totalTicket(t) {
   return s || num(t.total);
 }
 
+// Gasto en insumos del ticket: suma sus líneas SIN el IVA (para los análisis).
 // Desglosa un ticket en costo de venta (cv) vs operativo (op), y reparte el IVA
 // del ticket entre ambos según su proporción. Así el IVA que corresponde a los
 // insumos de "costo de venta" (ivaCV) SÍ se cuenta como parte de ese insumo,
@@ -934,11 +834,12 @@ export function semanaParcial(lunes, dias) {
 // ── Proveedores: unificar nombres que son el mismo ──────────
 // Palabras que no distinguen un proveedor (conectores y sufijos de razón social).
 const STOP_PROV = new Set(["de", "del", "la", "el", "los", "las", "y", "e",
-  "s", "a", "c", "v", "r", "l", "rl", "cv", "sa", "sc", "srl", "sapi", "sab", "sadecv"]);
+  "s", "a", "c", "v", "r", "l", "rl", "cv", "sa", "sc", "srl", "sapi", "sab", "sadecv",
+  "sucursal", "suc", "sucursales", "matriz", "no", "num", "numero", "mexico", "mex", "mx"]);
 // Clave normalizada: minúsculas, sin acentos, sin conectores ni "S de RL / SA de CV".
 export function normProv(s) {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w && !STOP_PROV.has(w)).join(" ").trim();
+    .replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w && !STOP_PROV.has(w) && !/^\d+$/.test(w)).join(" ").trim();
 }
 // Nombre canónico de un proveedor según el mapa de alias guardado en config.
 export function canonProv(nombre) {
@@ -1006,6 +907,17 @@ export async function fusionarProveedores(origen, destino) {
   const dir2 = dir.filter((x) => x.id !== origen.id);
 
   await guardarConfig({ proveedorAlias: al, proveedoresDir: dir2 });
+}
+
+// Todos los tickets de un proveedor (por nombre canónico, respetando las
+// unificaciones), del más reciente al más viejo.
+export function ticketsDeProveedor(nombre) {
+  const k = normProv(canonProv(nombre));
+  if (!k) return [];
+  return state.tickets
+    .filter((t) => t.proveedor && normProv(canonProv(t.proveedor)) === k)
+    .slice()
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
 }
 // ── Directorio de proveedores (con datos de contacto) ───────
 // Se guarda en config.proveedoresDir (JSON), igual que los alias. Cada ficha:
@@ -1097,17 +1009,6 @@ export function emparejarProveedorDir(nombre) {
   return best ? { proveedor: best, exacto: false } : null;
 }
 
-// Todos los tickets de un proveedor (por nombre canónico, respetando las
-// unificaciones), del más reciente al más viejo.
-export function ticketsDeProveedor(nombre) {
-  const k = normProv(canonProv(nombre));
-  if (!k) return [];
-  return state.tickets
-    .filter((t) => t.proveedor && normProv(canonProv(t.proveedor)) === k)
-    .slice()
-    .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
-}
-
 // TODOS los proveedores CONOCIDOS: los del directorio + los que ya aparecen en
 // tus tickets (ya canonizados por los alias de "unificar"), sin repetir.
 // Devuelve [{ key, nombre }]. Es la base para emparejar bien y no duplicar.
@@ -1142,7 +1043,20 @@ export function mejorMatchProveedor(nombre) {
     const tol = Math.max(1, Math.floor(Math.min(key.length, p.key.length) * 0.34));
     if (d <= tol && d < bestD) { best = p; bestD = d; }
   }
-  return best ? { nombre: best.nombre, exacto: false } : null;
+  if (best) return { nombre: best.nombre, exacto: false };
+  // Fallback por CONTENCIÓN: si TODOS los tokens de un proveedor conocido están
+  // dentro del nombre escrito (ej. "costco mayoreo tijuana" contiene "costco"),
+  // unifica al más específico. Exige un token distintivo (>=4) para no unir por genéricos.
+  const keyToks = new Set(key.split(" ").filter(Boolean));
+  let cont = null, contLen = 0;
+  for (const p of lista) {
+    const pToks = p.key.split(" ").filter(Boolean);
+    if (!pToks.length) continue;
+    if (pToks.every((t) => keyToks.has(t)) && pToks.some((t) => t.length >= 4) && p.key.length > contLen) {
+      cont = p; contLen = p.key.length;
+    }
+  }
+  return cont ? { nombre: cont.nombre, exacto: false } : null;
 }
 
 // Se llama al guardar/editar un ticket: si el proveedor escrito se parece a uno
@@ -1172,6 +1086,46 @@ function lev(a, b) {
   }
   return prev[n];
 }
+
+// ── Búsqueda de insumos (fuzzy: sin acentos, tolera errores de dedo) ────
+export function normIns(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+}
+// Insumos existentes parecidos a la consulta, rankeados (mejor primero).
+export function buscarInsumos(query, limit = 8) {
+  const lista = preciosPorInsumo();
+  const q = normIns(query);
+  if (!q) return lista.slice(0, limit);
+  const out = [];
+  for (const i of lista) {
+    const n = normIns(i.nombre);
+    let score = -1;
+    if (n === q) score = 100;
+    else if (n.startsWith(q) || q.startsWith(n)) score = 80;
+    else if (n.includes(q) || (n.length >= 3 && q.includes(n))) score = 65;
+    else if (n.split(" ").some((w) => w.startsWith(q))) score = 55;
+    else {
+      const d = lev(q, n);
+      if (d <= Math.max(2, Math.floor(q.length * 0.4))) score = 45 - d;
+      else {
+        const wd = Math.min(...n.split(" ").map((w) => lev(q, w)));
+        if (wd <= Math.max(1, Math.floor(q.length * 0.34))) score = 35 - wd;
+      }
+    }
+    if (score >= 0) out.push({ ...i, score });
+  }
+  out.sort((a, b) => b.score - a.score || a.nombre.length - b.nombre.length);
+  return out.slice(0, limit);
+}
+// El insumo existente más cercano a un nombre escrito (para no duplicar al agregar).
+// Solo unifica si el parecido es fuerte; si no, devuelve el nombre tal cual (insumo nuevo).
+export function emparejarInsumo(nombre) {
+  const raw = (nombre || "").trim();
+  if (!raw) return raw;
+  const hit = buscarInsumos(raw, 1)[0];
+  return (hit && hit.score >= 65) ? hit.nombre : raw;
+}
+
 // Proveedores existentes (ya canonizados) con cuántos tickets tiene cada uno.
 export function proveedoresConocidos() {
   const m = new Map();
