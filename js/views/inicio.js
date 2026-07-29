@@ -44,6 +44,16 @@ function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").repla
 
 const ES_CORTESIA = /pan de cortes[íi]a|propina/i;   // cortesía y propina no cuentan como venta
 const CAT_BEBIDA = new Set(["Barra de Café", "Bebidas"]);
+// Nombres que son CATEGORÍAS del reporte, no productos. Si aparecen como "producto"
+// es basura de una importación vieja (la tabla de categorías se coló) → se ignoran.
+const CATEGORIAS_NOMBRE = new Set(["desayunos", "comida", "comidas", "entradas", "postres",
+  "barra de café", "barra de cafe", "bebidas", "bebida", "refrescos", "mimosas", "extras", "otros",
+  "total productos", "sin variante"]);
+const esCategoriaNombre = (n) => CATEGORIAS_NOMBRE.has(String(n || "").trim().toLowerCase());
+// "Cayendo" se enfoca solo en cocina (comida y desayuno) y nunca cuenta el consumo de colaboradores.
+const ES_COMIDA_CAT = new Set(["desayunos", "desayuno", "comida", "comidas"]);
+const esComidaCat = (c) => ES_COMIDA_CAT.has(String(c || "").trim().toLowerCase());
+const ES_COLABORADOR = /colaborador/i;
 
 // Grupo modificador "principal" de un platillo/bebida (Tipo → Sabor; evita leche/temperatura).
 const ES_SECUNDARIO = /leche|fr[íi]o|caliente|shot|cold foam|temperatura/i;
@@ -74,7 +84,7 @@ function topVariante(producto, periodo) {
 // Más vendidos (platillo y bebida) del periodo más reciente con datos.
 function topProductos() {
   const prod = (store.state.productos || []).filter((p) =>
-    !ES_CORTESIA.test(p.producto || "") && !ES_CORTESIA.test(p.categoria || ""));
+    !ES_CORTESIA.test(p.producto || "") && !ES_CORTESIA.test(p.categoria || "") && !esCategoriaNombre(p.producto));
   if (!prod.length) return null;
   const pmap = new Map();
   for (const p of prod) if (!pmap.has(p.periodo)) pmap.set(p.periodo, p.desde);
@@ -103,13 +113,17 @@ function topProductos() {
 const MIN_VENTA = 15;   // arriba de 15 vendidos por semana = producto que sí importa
 function movimientosProductos() {
   const prod = (store.state.productos || []).filter((p) =>
-    !ES_CORTESIA.test(p.producto || "") && !ES_CORTESIA.test(p.categoria || ""));
+    !ES_CORTESIA.test(p.producto || "") && !ES_CORTESIA.test(p.categoria || "") && !esCategoriaNombre(p.producto));
   if (!prod.length) return null;
   const pmap = new Map();
   for (const p of prod) if (!pmap.has(p.periodo)) pmap.set(p.periodo, p.desde);
   const periodos = [...pmap.entries()].sort((a, b) => (a[1] < b[1] ? 1 : -1)).map((e) => e[0]);
   if (periodos.length < 2) return null;             // se necesitan 2 periodos para comparar
   const cur = periodos[0], prev = periodos[1];
+  // Solo comparamos SEMANAS CONSECUTIVAS. Si la semana anterior no tiene datos de producto
+  // cargados, NO comparamos contra una semana lejana (daría caídas/subidas falsas).
+  const diasGap = Math.round((new Date(pmap.get(cur) + "T00:00") - new Date(pmap.get(prev) + "T00:00")) / 86400000);
+  if (diasGap > 10) return null;
   const agg = (per) => {
     const m = new Map();
     for (const p of prod) if (p.periodo === per) {
@@ -131,14 +145,17 @@ function movimientosProductos() {
     if (chg <= -0.15) caidas.push({ nombre, cat, prev: av, cur: bv, drop: chg });
     else if (chg >= 0.15) subidas.push({ nombre, cat, prev: av, cur: bv, rise: chg });
   }
-  caidas.sort((a, b) => a.drop - b.drop);            // mayor caída primero
+  // "Cayendo" se enfoca solo en cocina (comida y desayuno) y excluye el consumo de colaboradores.
+  const caidasCocina = caidas.filter((x) => esComidaCat(x.cat) && !ES_COLABORADOR.test(x.nombre));
+  caidasCocina.sort((a, b) => a.drop - b.drop);      // mayor caída primero
   subidas.sort((a, b) => b.rise - a.rise);           // mayor subida primero
-  return { cur, prev, caidas, subidas };
+  return { cur, prev, caidas: caidasCocina, subidas };
 }
 
 // Insumo en el que más gastas y el que más subió de precio.
 function insumosDestacados() {
-  const ins = store.preciosPorInsumo();
+  // Solo insumos de COSTO DE VENTA (comida/barra); no gastos operativos/fijos como gas, luz o renta.
+  const ins = store.preciosPorInsumo().filter((i) => i.tipo === "costo de venta");
   if (!ins.length) return null;
   const conGasto = ins.map((i) => ({ ...i, gasto: (i.registros || []).reduce((a, r) => a + store.num(r.monto), 0) }));
   const masGasto = conGasto.slice().sort((a, b) => b.gasto - a.gasto)[0] || null;
@@ -149,9 +166,9 @@ function insumosDestacados() {
 }
 
 // Mini-tarjeta para los vistazos operativos.
-function tile(icon, label, big, sub, color) {
+function tile(icon, label, big, sub, color, tip) {
   return `<div style="background:rgba(46,196,182,.07);border:1px solid var(--linea);border-radius:14px;padding:13px 14px;min-width:0">
-    <div class="sub" style="font-size:11.5px;font-weight:600">${icon} ${label}</div>
+    <div class="sub" style="font-size:11.5px;font-weight:600">${icon} ${label}${tip ? info.iconoTip(tip) : ""}</div>
     <div style="font-size:16px;font-weight:700;letter-spacing:-.01em;margin-top:3px;line-height:1.2;color:${color || "var(--tinta)"};overflow-wrap:anywhere">${big}</div>
     <div class="sub" style="font-size:12px;margin-top:3px">${sub}</div>
   </div>`;
@@ -178,22 +195,36 @@ function cardVistazo(tp, ins, cd, pulso) {
       sub2 = `${fechaCorta(pulso.fecha)} · sin comparación`;
       col2 = "var(--tinta)";
     }
-    tiles.push(tile("📅", lbl, money(pulso.venta), sub2, col2));
+    tiles.push(tile("📅", lbl, money(pulso.venta), sub2, col2,
+      { t: "Venta del día", q: "La venta del último día que ya tiene corte de caja cargado.",
+        d: `Día tomado: ${fechaCorta(pulso.fecha)}. Se compara contra el mismo día (${diaSem}) de la semana pasada. Sale de tus cortes de caja.` }));
   }
   if (cd && cd.subidas.length) {
     const s = cd.subidas[0];
     tiles.push(tile("🚀", "Subiendo · semana", esc(s.nombre),
-      `▲ ${Math.round(s.rise * 100)}% · ${Math.round(s.prev)}→${Math.round(s.cur)} vendidos`, "var(--verde)"));
+      `▲ ${Math.round(s.rise * 100)}% · ${Math.round(s.prev)}→${Math.round(s.cur)} vendidos`, "var(--verde)",
+      { t: "Subiendo · semana", q: "El producto que más creció en unidades vendidas.",
+        c: "Compara las unidades de la semana reciente contra la anterior (subió ≥15%).",
+        d: `Semanas comparadas: ${cd.cur} (reciente) vs ${cd.prev} (anterior). Sale de tus reportes de venta por producto.` }));
   }
   if (cd && cd.caidas.length) {
     const c = cd.caidas[0];
     tiles.push(tile("📉", "Cayendo · semana", esc(c.nombre),
-      `▼ ${Math.round(Math.abs(c.drop) * 100)}% · ${Math.round(c.prev)}→${Math.round(c.cur)} vendidos`, "var(--rojo)"));
+      `▼ ${Math.round(Math.abs(c.drop) * 100)}% · ${Math.round(c.prev)}→${Math.round(c.cur)} vendidos`, "var(--rojo)",
+      { t: "Cayendo · semana", q: "El platillo de cocina que más bajó en unidades.",
+        c: "Solo Comida y Desayunos; excluye bebidas, postres y consumo de colaboradores (cayó ≥15%).",
+        d: `Semanas comparadas: ${cd.cur} (reciente) vs ${cd.prev} (anterior). Sale de tus reportes de venta por producto.` }));
   }
   if (ins && ins.masSubio) tiles.push(tile("📈", "Insumo que más subió", esc(ins.masSubio.nombre),
-    `▲ ${money(ins.masSubio.cambio)} · ${money(ins.masSubio.precioActual)}${ins.masSubio.unidad ? "/" + esc(ins.masSubio.unidad) : ""}`, "var(--rojo)"));
+    `▲ ${money(ins.masSubio.cambio)} · ${money(ins.masSubio.precioActual)}${ins.masSubio.unidad ? "/" + esc(ins.masSubio.unidad) : ""}`, "var(--rojo)",
+    { t: "Insumo que más subió", q: "El insumo de costo de venta cuyo precio más aumentó.",
+      c: "Compara el precio de su compra más reciente contra la anterior.",
+      d: "Sale de TODOS tus tickets (histórico, no una sola semana). Solo insumos de costo de venta, no gas/luz/renta." }));
   if (ins && ins.masGasto) tiles.push(tile("💸", "En lo que más gastas", esc(ins.masGasto.nombre),
-    `${kmoney(ins.masGasto.gasto)} · ${ins.masGasto.veces} compra(s)`, "var(--naranja)"));
+    `${kmoney(ins.masGasto.gasto)} · ${ins.masGasto.veces} compra(s)`, "var(--naranja)",
+    { t: "En lo que más gastas", q: "El insumo de costo de venta en el que llevas más dinero.",
+      c: "Suma el monto de todas tus compras de ese insumo.",
+      d: "Sale de TODOS tus tickets cargados (histórico, no una sola semana). Solo insumos de costo de venta." }));
   if (!tiles.length) return "";   // sin movimientos ni insumos → no muestres tarjeta vacía
   return `<div class="card"><h2 style="margin-bottom:11px">De un vistazo</h2>${grid2(tiles)}</div>`;
 }

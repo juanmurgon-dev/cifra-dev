@@ -1248,11 +1248,12 @@ export function preciosPorInsumo() {
       const nombre = (l.descripcion || "").trim();
       if (!nombre) continue;
       if (/propina/i.test(nombre) || ES_IVA.test(nombre)) continue;   // propina/IVA no son insumo
-      const key = nombre.toLowerCase();
+      const key = normIns(nombre);   // acentos/espacios/mayúsculas no crean insumos duplicados
       if (!map.has(key)) map.set(key, { nombre, area: l.area, registros: [] });
       const pu = num(l.precio_unitario) || (num(l.cantidad) ? num(l.monto) / num(l.cantidad) : num(l.monto));
       map.get(key).registros.push({
-        fecha: t.fecha, precio: pu, unidad: l.unidad, proveedor: canonProv(t.proveedor), monto: num(l.monto)
+        fecha: t.fecha, precio: pu, unidad: l.unidad, proveedor: canonProv(t.proveedor), monto: num(l.monto),
+        tipo: TIPOS.includes(l.tipo) ? l.tipo : "operativo"
       });
     }
   }
@@ -1267,6 +1268,8 @@ export function preciosPorInsumo() {
     v.unidad = ultimo.unidad;
     v.variacion = previo && previo.precio ? (ultimo.precio - previo.precio) / previo.precio : 0;
     v.veces = v.registros.length;
+    // Clasificación del insumo: "costo de venta" u "operativo" (la de su registro más reciente).
+    v.tipo = (ultimo && ultimo.tipo) || "operativo";
     arr.push(v);
   }
   arr.sort((a, b) => b.veces - a.veces);
@@ -1303,7 +1306,7 @@ export function ritmoCompras() {
     for (const l of t.lineas || []) {
       const nombre = (l.descripcion || "").trim();
       if (!nombre || /propina/i.test(nombre) || ES_IVA.test(nombre)) continue;
-      const key = nombre.toLowerCase();
+      const key = normIns(nombre);   // acentos/espacios/mayúsculas no crean insumos duplicados
       let o = insMap.get(key);
       if (!o) { o = { nombre, area: l.area, fechas: [], montos: [], unidad: l.unidad || "", provs: new Set() }; insMap.set(key, o); }
       o.fechas.push(t.fecha);
