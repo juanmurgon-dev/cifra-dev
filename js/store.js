@@ -375,6 +375,7 @@ export async function guardarRequisicion(req) {
   const { error } = await supabase.from("requisiciones").upsert(row);
   if (error) throw error;
   await cargarRequisiciones();
+  logActividad("requisicion");
 }
 
 export async function borrarRequisicion(id) {
@@ -550,6 +551,13 @@ export async function init() {
 }
 
 // ── Escribir ────────────────────────────────────────────────
+// Registra una acción del usuario para el panel de uso (aperturas, capturas, etc.).
+export async function logActividad(evento, detalle = "") {
+  try {
+    await supabase.from("actividad").insert({ org_id: state.orgId || null, evento, detalle: String(detalle || "").slice(0, 120) });
+  } catch (_) { /* sin panel de actividad, ignora */ }
+}
+
 export async function guardarTicket(t) {
   const proveedor = await clasificarProveedorTicket(t.proveedor || "");
   const { error } = await supabase.from("tickets").insert({
@@ -563,6 +571,7 @@ export async function guardarTicket(t) {
   });
   if (error) throw error;
   await cargarTickets();
+  logActividad("ticket");
   return proveedor;
 }
 
