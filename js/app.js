@@ -11,31 +11,26 @@ import * as chat from "./chat.js";
 
 import * as inicio from "./views/inicio.js";
 import * as reportes from "./views/reportes.js";
-import * as ventas from "./views/ventas.js";
-import * as margen from "./views/margen.js";
-import * as insumos from "./views/insumos.js";
-import * as recetas from "./views/recetas.js";
-import * as requisicion from "./views/requisicion.js";
+import * as ventasHub from "./views/ventas-hub.js";   // Ventas · Margen · Recetas
+import * as insumos from "./views/insumos.js";        // + Requisición adentro
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.104-beta";
+export const APP_VERSION = "v3.105-beta";
 export const APP_FECHA = "27 jul 2026";
 
 const VISTAS = {
   inicio:      { mod: inicio,      ic: "🏠", txt: "Inicio" },
+  ventas:      { mod: ventasHub,   ic: "💵", txt: "Ventas" },
   insumos:     { mod: insumos,     ic: "📦", txt: "Insumos" },
-  ventas:      { mod: ventas,      ic: "💵", txt: "Ventas" },
-  recetas:     { mod: recetas,     ic: "📖", txt: "Recetas" },
-  margen:      { mod: margen,      ic: "📈", txt: "Margen" },
-  reportes:    { mod: reportes,    ic: "📊", txt: "Gastos" },
-  requisicion: { mod: requisicion, ic: "🛒", txt: "Requis." }
+  reportes:    { mod: reportes,    ic: "📊", txt: "Gastos" }
 };
 
 // Pestañas visibles por rol. Los que NO están aquí (owner, admin, gerente y
 // desconocido) ven TODAS. En single-tenant (miRol=null) también ven todas.
+// (Recetas vive en Ventas; Requisición vive en Insumos.)
 const TABS_ROL = {
-  chef:    ["inicio", "insumos", "recetas", "requisicion"],
-  compras: ["inicio", "requisicion", "insumos"],
+  chef:    ["inicio", "ventas", "insumos"],
+  compras: ["inicio", "insumos"],
   staff:   ["inicio", "insumos"],
 };
 function tabsPermitidas() {
@@ -207,7 +202,7 @@ function pintarTabs() {
   if (!tabs) return;
   tabs.innerHTML = tabsPermitidas().map((k) => {
     const v = VISTAS[k];
-    const badge = k === "requisicion" ? `<span class="tab-badge" data-badge="requisicion" hidden></span>` : "";
+    const badge = k === "insumos" ? `<span class="tab-badge" data-badge="requisicion" hidden></span>` : "";
     return `<a href="#/${k}" data-k="${k}"><span class="ic">${v.ic}</span>${v.txt}${badge}</a>`;
   }).join("");
   const clave = (location.hash.replace("#/", "") || "inicio");
