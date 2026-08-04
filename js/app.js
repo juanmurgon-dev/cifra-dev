@@ -15,7 +15,7 @@ import * as ventasHub from "./views/ventas-hub.js";   // Ventas · Margen · Rec
 import * as insumos from "./views/insumos.js";        // + Requisición adentro
 
 // ⬇⬇ Al publicar una versión nueva: sube ESTE número y el CACHE en sw.js.
-export const APP_VERSION = "v3.111-beta";
+export const APP_VERSION = "v3.112-beta";
 export const APP_FECHA = "27 jul 2026";
 
 const VISTAS = {
