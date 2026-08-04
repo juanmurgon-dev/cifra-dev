@@ -593,6 +593,17 @@ export async function actualizarTicket(id, datos) {
 
 // Corrige el NOMBRE y/o UNIDAD de un insumo en TODOS sus tickets (arregla el costeo).
 // Devuelve cuántos tickets se tocaron.
+export function presentacionDe(nombre) {
+  return (state.config.presentaciones || {})[normIns(nombre)] || "";
+}
+export async function guardarPresentacion(nombre, texto) {
+  const m = { ...(state.config.presentaciones || {}) };
+  const k = normIns(nombre);
+  const t = String(texto || "").trim();
+  if (t) m[k] = t; else delete m[k];
+  await guardarConfig({ presentaciones: m });
+}
+
 export async function renombrarInsumo(viejo, nuevoNombre, nuevaUnidad, nuevoCodigo) {
   const vk = String(viejo || "").trim().toLowerCase();
   const nombre = String(nuevoNombre || "").trim();
@@ -1314,6 +1325,7 @@ export function preciosPorInsumo() {
     v.variacion = previo && previo.precio ? (ultimo.precio - previo.precio) / previo.precio : 0;
     v.veces = v.registros.length;
     v.codigo = (v.registros.find((r) => r.codigo) || {}).codigo || "";
+    v.presentacion = (state.config.presentaciones || {})[normIns(v.nombre)] || "";
     // Clasificación del insumo: "costo de venta" u "operativo" (la de su registro más reciente).
     v.tipo = (ultimo && ultimo.tipo) || "operativo";
     arr.push(v);
