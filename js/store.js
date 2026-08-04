@@ -593,15 +593,33 @@ export async function actualizarTicket(id, datos) {
 
 // Corrige el NOMBRE y/o UNIDAD de un insumo en TODOS sus tickets (arregla el costeo).
 // Devuelve cuántos tickets se tocaron.
-export function presentacionDe(nombre) {
-  return (state.config.presentaciones || {})[normIns(nombre)] || "";
-}
-export async function guardarPresentacion(nombre, texto) {
-  const m = { ...(state.config.presentaciones || {}) };
+export function presentacionDe(nombre, proveedor) {
+  const m = state.config.presentaciones || {};
   const k = normIns(nombre);
+  if (proveedor != null && proveedor !== "") {
+    const kp = k + "|" + normProv(proveedor);
+    if (m[kp] != null && m[kp] !== "") return m[kp];
+  }
+  return m[k] || "";
+}
+export async function guardarPresentacion(nombre, proveedor, texto) {
+  const m = { ...(state.config.presentaciones || {}) };
+  const k = normIns(nombre) + (proveedor != null && proveedor !== "" ? "|" + normProv(proveedor) : "");
   const t = String(texto || "").trim();
   if (t) m[k] = t; else delete m[k];
   await guardarConfig({ presentaciones: m });
+}
+export function skuProvDe(nombre, proveedor) {
+  const m = state.config.skusProv || {};
+  const kp = normIns(nombre) + "|" + normProv(proveedor);
+  return m[kp] || "";
+}
+export async function guardarSkuProv(nombre, proveedor, texto) {
+  const m = { ...(state.config.skusProv || {}) };
+  const k = normIns(nombre) + "|" + normProv(proveedor);
+  const t = String(texto || "").trim();
+  if (t) m[k] = t; else delete m[k];
+  await guardarConfig({ skusProv: m });
 }
 
 export async function renombrarInsumo(viejo, nuevoNombre, nuevaUnidad, nuevoCodigo) {
@@ -1325,7 +1343,7 @@ export function preciosPorInsumo() {
     v.variacion = previo && previo.precio ? (ultimo.precio - previo.precio) / previo.precio : 0;
     v.veces = v.registros.length;
     v.codigo = (v.registros.find((r) => r.codigo) || {}).codigo || "";
-    v.presentacion = (state.config.presentaciones || {})[normIns(v.nombre)] || "";
+    v.presentacion = presentacionDe(v.nombre, ultimo && ultimo.proveedor);
     // Clasificación del insumo: "costo de venta" u "operativo" (la de su registro más reciente).
     v.tipo = (ultimo && ultimo.tipo) || "operativo";
     arr.push(v);
