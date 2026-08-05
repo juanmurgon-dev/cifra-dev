@@ -274,7 +274,11 @@ export function unidadInsumo(nombre) {
 // Se costea la CANTIDAD BRUTA (lo que sacas del almacén, que es lo que pagas).
 // La merma NO baja el costo: sirve para saber cuánto queda útil (cantidad neta).
 export function costoLinea(insumo, cantidad, unidad, merma, seen) {
-  return num(cantidad) * factorConversion(unidad, unidadInsumo(insumo)) * costoInsumo(insumo, seen);
+  const ui = unidadInsumo(insumo);
+  // Si receta y compra son de familias distintas (ej. receta en g, compra en L/pza),
+  // NO se puede convertir → no inflar el costo con números absurdos: lo dejamos en $0.
+  if (unidad && ui && !unidadesCompatibles(unidad, ui)) return 0;
+  return num(cantidad) * factorConversion(unidad, ui) * costoInsumo(insumo, seen);
 }
 // Cantidad neta (aprovechable) después de la merma.
 export function cantidadNeta(cantidad, merma) {
